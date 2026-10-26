@@ -309,8 +309,9 @@ final metadataPluginIsSavedTrackProvider =
     FutureProvider.autoDispose.family<bool, String>(
   (ref, trackId) async {
     final savedTracksState = ref.watch(metadataPluginSavedTracksProvider);
-    final savedTracks = savedTracksState.valueOrNull ??
-        await ref.watch(metadataPluginSavedTracksProvider.future);
+    final SpotubePaginationResponseObject<SpotubeFullTrackObject> savedTracks =
+        savedTracksState.valueOrNull ??
+            await ref.watch(metadataPluginSavedTracksProvider.future);
     final allSavedTracks = savedTracks.hasMore
         ? await ref.read(metadataPluginSavedTracksProvider.notifier).fetchAll()
         : savedTracks.items;
