@@ -140,10 +140,17 @@ class MetadataPlugin {
     await HetuSpotubePluginLoader.loadBytecodeFlutter(hetu);
 
     hetu.loadBytecode(bytes: byteCode, moduleName: "plugin");
+    var entryPoint = config.entryPoint.trim();
+    if (entryPoint.startsWith('import "plugin.out" as plugin')) {
+      entryPoint = entryPoint
+          .replaceFirst('import "plugin.out" as plugin', '')
+          .replaceFirst('var Plugin', 'SpotifyMetadataProviderPlugin')
+          .trim();
+    }
     hetu.eval("""
       import "module:plugin" as plugin
 
-      var Plugin = plugin.${config.entryPoint}
+      var Plugin = plugin.$entryPoint
 
       var metadataPlugin = Plugin()
       """);

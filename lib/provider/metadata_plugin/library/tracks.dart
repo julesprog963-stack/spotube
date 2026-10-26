@@ -9,42 +9,83 @@ import 'package:spotube/provider/metadata_plugin/utils/common.dart';
 import 'package:spotube/provider/metadata_plugin/utils/paginated.dart';
 
 const _kOfflineSavedTracksCacheKey = 'spotube_offline_saved_tracks_v1';
+const _kLocalAddedFavoritesKey = 'spotube_local_added_favorites_v1';
+const _kLocalRemovedFavoritesKey = 'spotube_local_removed_favorites_v1';
 
 class MetadataPluginSavedTracksNotifier
     extends AutoDisposePaginatedAsyncNotifier<SpotubeFullTrackObject> {
   MetadataPluginSavedTracksNotifier() : super();
 
-  Future<void> _saveOfflineCache(
-    SpotubePaginationResponseObject<SpotubeFullTrackObject> data,
+  Future<List<SpotubeFullTrackObject>> _loadLocalAddedFavorites() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final raw = prefs.getString(_kLocalAddedFavoritesKey);
+      if (raw == null || raw.isEmpty) return [];
+      final list = jsonDecode(raw) as List;
+      return list
+          .map((e) =>
+              SpotubeFullTrackObject.fromJson((e as Map).cast<String, dynamic>()))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<Set<String>> _loadLocalRemovedFavorites() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final list = prefs.getStringList(_kLocalRemovedFavoritesKey);
+      return list?.toSet() ?? <String>{};
+    } catch (_) {
+      return <String>{};
+    }
+  }
+
+  Future<void> _recordLocalFavoriteAdd(
+    List<SpotubeFullTrackObject> addedTracks,
   ) async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      List<SpotubeFullTrackObject> mergedItems = [...data.items];
-      final existingRaw = prefs.getString(_kOfflineSavedTracksCacheKey);
-      if (existingRaw != null && existingRaw.isNotEmpty) {
-        try {
-          final existingMap = jsonDecode(existingRaw) as Map<String, dynamic>;
-          final existing =
-              SpotubePaginationResponseObject<SpotubeFullTrackObject>.fromJson(
-            existingMap,
-            SpotubeFullTrackObject.fromJson,
-          );
-          final seenIds = mergedItems.map((e) => e.id).toSet();
-          for (final item in existing.items) {
-            if (seenIds.add(item.id)) {
-              mergedItems.add(item);
-            }
-          }
-        } catch (_) {}
+      final existingAdded = await _loadLocalAddedFavorites();
+      final removedIds = await _loadLocalRemovedFavorites();
+      for (final t in addedTracks) {
+        removedIds.remove(t.id);
       }
-      final jsonMap = {
-        'limit': mergedItems.length,
-        'nextOffset': null,
-        'total': data.total > mergedItems.length ? data.total : mergedItems.length,
-        'hasMore': false,
-        'items': mergedItems.map((e) => e.toJson()).toList(),
-      };
-      await prefs.setString(_kOfflineSavedTracksCacheKey, jsonEncode(jsonMap));
+      final seen = <String>{};
+      final merged = <SpotubeFullTrackObject>[];
+      for (final t in [...addedTracks, ...existingAdded]) {
+        if (seen.add(t.id)) {
+          merged.add(t);
+        }
+      }
+      await prefs.setString(
+        _kLocalAddedFavoritesKey,
+        jsonEncode(merged.map((e) => e.toJson()).toList()),
+      );
+      await prefs.setStringList(
+        _kLocalRemovedFavoritesKey,
+        removedIds.toList(),
+      );
+    } catch (_) {}
+  }
+
+  Future<void> _recordLocalFavoriteRemove(List<String> removedTrackIds) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final removeSet = removedTrackIds.toSet();
+      final existingAdded = await _loadLocalAddedFavorites();
+      final updatedAdded =
+          existingAdded.where((t) => !removeSet.contains(t.id)).toList();
+      final removedIds = await _loadLocalRemovedFavorites();
+      removedIds.addAll(removeSet);
+      await prefs.setString(
+        _kLocalAddedFavoritesKey,
+        jsonEncode(updatedAdded.map((e) => e.toJson()).toList()),
+      );
+      await prefs.setStringList(
+        _kLocalRemovedFavoritesKey,
+        removedIds.toList(),
+      );
     } catch (_) {}
   }
 
@@ -95,18 +136,39 @@ class MetadataPluginSavedTracksNotifier
             offset: offset,
             limit: limit,
           );
-      if (tracks.items.isNotEmpty) {
+      if (offset == 0) {
+        final localAdded = await _loadLocalAddedFavorites();
+        final localRemoved = await _loadLocalRemovedFavorites();
+        final cached = await _loadOfflineCache();
+        final remoteIds = tracks.items.map((e) => e.id).toSet();
+        final cachedOnly = (cached?.items ?? <SpotubeFullTrackObject>[])
+            .where((t) => !remoteIds.contains(t.id))
+            .toList();
         final currentItems = state.value?.items ?? <SpotubeFullTrackObject>[];
+
         final seen = <String>{};
         final combined = <SpotubeFullTrackObject>[];
-        for (final t in [...currentItems, ...tracks.items]) {
-          if (seen.add(t.id)) {
+        for (final t in [
+          ...localAdded,
+          ...cachedOnly,
+          ...currentItems,
+          ...tracks.items,
+        ]) {
+          if (!localRemoved.contains(t.id) && seen.add(t.id)) {
             combined.add(t);
           }
         }
-        await _saveOfflineCache(
-          tracks.copyWith(items: combined),
+        final mergedResponse = SpotubePaginationResponseObject<SpotubeFullTrackObject>(
+          limit: combined.length,
+          nextOffset: tracks.nextOffset,
+          total: combined.length > tracks.total ? combined.length : tracks.total,
+          hasMore: tracks.hasMore,
+          items: combined,
         );
+        if (combined.isNotEmpty) {
+          await _saveExactOfflineCache(mergedResponse);
+        }
+        return mergedResponse;
       }
       return tracks;
     } catch (e) {
@@ -158,20 +220,35 @@ class MetadataPluginSavedTracksNotifier
   }
 
   Future<void> addFavorite(List<SpotubeTrackObject> tracks) async {
-    if (state.value == null) {
+    var currentState = state.value;
+    if (currentState == null) {
+      try {
+        currentState = await future;
+      } catch (_) {
+        currentState = await _loadOfflineCache();
+      }
+    }
+    if (currentState == null) {
       return;
     }
 
     final fullTracks = tracks.whereType<SpotubeFullTrackObject>().toList();
-    final oldState = state.value;
-    final updatedState = state.value!.copyWith(
-      items: [
-        ...fullTracks,
-        ...state.value!.items,
-      ],
+    final seen = <String>{};
+    final mergedItems = <SpotubeFullTrackObject>[];
+    for (final t in [...fullTracks, ...currentState.items]) {
+      if (seen.add(t.id)) {
+        mergedItems.add(t);
+      }
+    }
+
+    final updatedState = currentState.copyWith(
+      items: mergedItems,
+      total: mergedItems.length,
+      limit: mergedItems.length,
     );
     state = AsyncData(updatedState);
-    await _saveOfflineCache(updatedState);
+    await _recordLocalFavoriteAdd(fullTracks);
+    await _saveExactOfflineCache(updatedState);
 
     if (fullTracks.isNotEmpty) {
       Future.microtask(() {
@@ -181,35 +258,43 @@ class MetadataPluginSavedTracksNotifier
 
     try {
       await (await metadataPlugin).track.save(tracks.map((e) => e.id).toList());
-    } catch (e) {
-      state = AsyncData(oldState!);
-      rethrow;
+    } catch (_) {
+      // Keep local favorite state and offline cache even if remote save fails
     }
   }
 
   Future<void> removeFavorite(List<SpotubeTrackObject> tracks) async {
-    if (state.value == null) {
+    var currentState = state.value;
+    if (currentState == null) {
+      try {
+        currentState = await future;
+      } catch (_) {
+        currentState = await _loadOfflineCache();
+      }
+    }
+    if (currentState == null) {
       return;
     }
 
-    final oldState = state.value;
-    final updatedState = state.value!.copyWith(
-      items: state.value!.items
-          .where(
-            (savedTrack) => !tracks.any((track) => track.id == savedTrack.id),
-          )
-          .toList(),
+    final removeIds = tracks.map((e) => e.id).toList();
+    final filteredItems = currentState.items
+        .where(
+          (savedTrack) => !tracks.any((track) => track.id == savedTrack.id),
+        )
+        .toList();
+    final updatedState = currentState.copyWith(
+      items: filteredItems,
+      total: filteredItems.length,
+      limit: filteredItems.length,
     );
     state = AsyncData(updatedState);
+    await _recordLocalFavoriteRemove(removeIds);
     await _saveExactOfflineCache(updatedState);
 
     try {
-      await (await metadataPlugin)
-          .track
-          .unsave(tracks.map((e) => e.id).toList());
-    } catch (e) {
-      state = AsyncData(oldState!);
-      rethrow;
+      await (await metadataPlugin).track.unsave(removeIds);
+    } catch (_) {
+      // Keep local removal state and offline cache even if remote unsave fails
     }
   }
 }
@@ -223,7 +308,8 @@ final metadataPluginSavedTracksProvider = AutoDisposeAsyncNotifierProvider<
 final metadataPluginIsSavedTrackProvider =
     FutureProvider.autoDispose.family<bool, String>(
   (ref, trackId) async {
-    final savedTracks =
+    final savedTracksState = ref.watch(metadataPluginSavedTracksProvider);
+    final savedTracks = savedTracksState.valueOrNull ??
         await ref.watch(metadataPluginSavedTracksProvider.future);
     final allSavedTracks = savedTracks.hasMore
         ? await ref.read(metadataPluginSavedTracksProvider.notifier).fetchAll()
