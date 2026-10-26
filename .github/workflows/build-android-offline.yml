@@ -1,0 +1,91 @@
+name: Build Android APK (Offline & Auto-Download)
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  FLUTTER_VERSION: 3.35.2
+  FLUTTER_CHANNEL: master
+
+permissions:
+  contents: write
+
+jobs:
+  build_android:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2.18.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+          git-source: https://github.com/flutter/flutter.git
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: "zulu"
+          java-version: "17"
+          cache: "gradle"
+          check-latest: true
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install Android dependencies
+        run: |
+          flutter pub get
+          dart cli/cli.dart install-dependencies --platform=android --arch=all
+
+      - name: Generate Release Keystore
+        run: |
+          keytool -genkeypair -v \
+            -keystore android/app/upload-keystore.jks \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -alias upload \
+            -storepass spotube123 \
+            -keypass spotube123 \
+            -dname "CN=Spotube, OU=Dev, O=Spotube, L=City, S=State, C=MX"
+          cat << 'EOF' > android/key.properties
+          storePassword=spotube123
+          keyPassword=spotube123
+          keyAlias=upload
+          storeFile=upload-keystore.jks
+          EOF
+
+      - name: Build Android APK
+        run: dart cli/cli.dart build --arch=all android
+        env:
+          CHANNEL: stable
+          DOTENV: |
+            LASTFM_API_KEY=00000000000000000000000000000000
+            LASTFM_API_SECRET=00000000000000000000000000000000
+            HIDE_DONATIONS=0
+            ENABLE_UPDATE_CHECK=0
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Spotube-android-all-arch
+          path: build/Spotube-android-all-arch.apk
+
+      - name: Publish GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: v5.1.2-offline
+          name: "v5.1.2-offline - Android APK (Offline Liked Songs & Auto-Download)"
+          body: |
+            Custom build of Spotube v5.1.2 for Android & Desktop with:
+            - **Offline Liked Songs (Canciones Favoritas):** Caches your Liked Songs locally and plays them directly from your Downloads folder (`/storage/emulated/0/Download/Spotube`) when you have no internet.
+            - **Auto-Download on Heart (❤️):** Automatically queues and downloads any song you mark as Favorite (Me gusta).
+            - **Pagination Race Condition Fix:** Prevents concurrent `fetchAll()` loops from duplicating songs exponentially.
+          allowUpdates: true
+          artifacts: build/Spotube-android-all-arch.apk
