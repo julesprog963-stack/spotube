@@ -58,7 +58,6 @@ mixin BuildCommandCommonSteps on Command {
     await shell.run(
       """
       flutter pub get
-      dart run build_runner build --delete-conflicting-outputs
       dart pub global activate fastforge
       """,
     );

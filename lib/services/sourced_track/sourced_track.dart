@@ -57,6 +57,26 @@ class SourcedTrack extends BasicSourcedTrack {
     return null;
   }
 
+  static File? findDownloadedTrackFileSync(
+    SpotubeTrackObject track,
+    String downloadLocation,
+  ) {
+    if (downloadLocation.isEmpty) return null;
+    final artists = track.artists.map((e) => e.name).join(", ");
+    for (final ext in const ["m4a", "weba", "mp3", "flac", "ogg"]) {
+      final candidate = File(
+        path_lib.join(
+          downloadLocation,
+          ServiceUtils.sanitizeFilename("${track.name} - $artists.$ext"),
+        ),
+      );
+      if (candidate.existsSync()) {
+        return candidate;
+      }
+    }
+    return null;
+  }
+
   static List<SpotubeAudioSourceStreamObject> _offlineFallbackStreams() {
     return [
       SpotubeAudioSourceStreamObject(

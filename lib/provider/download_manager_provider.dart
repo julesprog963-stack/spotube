@@ -97,22 +97,25 @@ class DownloadManagerNotifier extends Notifier<List<DownloadTask>> {
       ),
     ];
 
-    ref.read(sourcedTrackProvider(track));
-
     _startDownloading(); // No await should be invoked to avoid stuck UI
   }
 
   void addAllToQueue(List<SpotubeFullTrackObject> tracks) {
+    final existingIds = state.map((e) => e.track.id).toSet();
+    final newTasks = tracks
+        .where((e) => !existingIds.contains(e.id))
+        .map((e) => DownloadTask(
+              track: e,
+              status: DownloadStatus.queued,
+              cancelToken: CancelToken(),
+            ))
+        .toList();
+    if (newTasks.isEmpty) return;
     state = [
       ...state,
-      ...tracks.map((e) => DownloadTask(
-            track: e,
-            status: DownloadStatus.queued,
-            cancelToken: CancelToken(),
-          )),
+      ...newTasks,
     ];
 
-    ref.read(sourcedTrackProvider(tracks.first));
     _startDownloading(); // No await should be invoked to avoid stuck UI
   }
 
@@ -179,9 +182,9 @@ class DownloadManagerNotifier extends Notifier<List<DownloadTask>> {
   Future<void> _downloadTrack(DownloadTask task) async {
     try {
       _setStatus(task.track, DownloadStatus.downloading);
-      final track = await ref.read(sourcedTrackProvider(task.track).future);
       if (task.cancelToken.isCancelled) {
         _setStatus(task.track, DownloadStatus.canceled);
+        return;
       }
       final presets = ref.read(audioSourcePresetsProvider);
       final container =
@@ -189,29 +192,36 @@ class DownloadManagerNotifier extends Notifier<List<DownloadTask>> {
       final downloadLocation = ref.read(
           userPreferencesProvider.select((value) => value.downloadLocation));
 
-      final url = track.getUrlOfQuality(
-        container,
-        presets.selectedDownloadingQualityIndex,
-      );
-
-      if (url == null) {
-        throw Exception("No download URL found for selected codec");
-      }
-
       final savePath = join(
         downloadLocation,
         ServiceUtils.sanitizeFilename(
-          "${track.query.name} - ${track.query.artists.map((e) => e.name).join(", ")}.${container.getFileExtension()}",
+          "${task.track.name} - ${task.track.artists.map((e) => e.name).join(", ")}.${container.getFileExtension()}",
         ),
       );
 
       final savePathFile = File(savePath);
       if (await savePathFile.exists()) {
-        // dio automatically replaces the file if it exists so no deletion required
         if (!await _shouldReplaceFileOnExist(task)) {
-          _setStatus(track.query, DownloadStatus.completed);
+          _setStatus(task.track, DownloadStatus.completed);
           return;
         }
+        await savePathFile.delete();
+        ref.invalidate(sourcedTrackProvider(task.track));
+      }
+
+      final track = await ref.read(sourcedTrackProvider(task.track).future);
+      if (task.cancelToken.isCancelled) {
+        _setStatus(task.track, DownloadStatus.canceled);
+        return;
+      }
+
+      final url = track.getUrlOfQuality(
+        container,
+        presets.selectedDownloadingQualityIndex,
+      );
+
+      if (url == null || url.startsWith("http://127.0.0.1:1/")) {
+        throw Exception("No download URL found for selected codec");
       }
 
       final response = await dio.chunkDownload(
@@ -262,19 +272,26 @@ class DownloadManagerNotifier extends Notifier<List<DownloadTask>> {
     }
   }
 
-  Future<void> _startDownloading() async {
-    for (final task in state) {
-      if (task.status == DownloadStatus.downloading) return;
+  bool _isRunningLoop = false;
 
-      if (task.status == DownloadStatus.queued) {
-        try {
-          await _downloadTrack(task);
-        } finally {
-          // After completion, check for more queued tasks
-          // Ignore errors of the prior task to allow next task to complete
-          await _startDownloading();
+  Future<void> _startDownloading() async {
+    if (_isRunningLoop) return;
+    _isRunningLoop = true;
+    try {
+      while (true) {
+        if (state.any((t) => t.status == DownloadStatus.downloading)) {
+          break;
         }
+        final nextTask = state.firstWhereOrNull(
+          (t) => t.status == DownloadStatus.queued,
+        );
+        if (nextTask == null) {
+          break;
+        }
+        await _downloadTrack(nextTask);
       }
+    } finally {
+      _isRunningLoop = false;
     }
   }
 }

@@ -1,4 +1,4 @@
-name: Build Android APK (Offline & Auto-Download)
+name: Build Android APK & Linux Desktop (Offline & Auto-Download)
 
 on:
   push:
@@ -14,6 +14,60 @@ permissions:
   contents: write
 
 jobs:
+  build_linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2.18.0
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: ${{ env.FLUTTER_CHANNEL }}
+          cache: true
+          git-source: https://github.com/flutter/flutter.git
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - name: Install Linux dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y wget tar xz-utils clang cmake ninja-build pkg-config libgtk-3-dev make python3-pip python3-setuptools desktop-file-utils libgdk-pixbuf2.0-dev fakeroot patchelf gir1.2-appindicator3-0.1 libappindicator3-1 libappindicator3-dev libsecret-1-0 libsecret-1-dev libjsoncpp-dev libnotify-bin libnotify-dev mpv libmpv-dev libwebkit2gtk-4.1-0 libwebkit2gtk-4.1-dev libsoup-3.0-0 libsoup-3.0-dev
+
+      - name: Build Linux Release Bundle
+        run: |
+          flutter pub get
+          flutter build linux --release
+          mkdir -p dist /tmp/spotube-tar
+          cp -r build/linux/x64/release/bundle/* /tmp/spotube-tar/
+          cp linux/spotube.desktop /tmp/spotube-tar/spotube.desktop
+          cp linux/com.github.KRTirtho.Spotube.appdata.xml /tmp/spotube-tar/com.github.KRTirtho.Spotube.appdata.xml
+          cp assets/branding/spotube-logo.png /tmp/spotube-tar/spotube-logo.png
+          tar -cJf dist/Spotube-linux-x86_64.tar.xz -C /tmp/spotube-tar .
+
+      - name: Upload Linux Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Spotube-linux-x86_64
+          path: dist/Spotube-linux-x86_64.tar.xz
+
+      - name: Publish Linux Bundle to GitHub Release
+        uses: ncipollo/release-action@v1
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          tag: v5.1.2-offline
+          name: "v5.1.2-offline - Android APK & Linux Desktop (Offline Liked Songs & Auto-Download)"
+          body: |
+            Custom build of Spotube v5.1.2 for Android & Linux Desktop with:
+            - **Download Status Badge in Liked Songs & Playlists:** Shows a Spotify-style green badge and status icon next to every song so you immediately see which tracks are downloaded and which are not.
+            - **100% Native Offline Liked Songs (Canciones Favoritas):** Caches your Liked Songs locally (`SharedPreferences`) and plays them directly from your Downloads folder (`/storage/emulated/0/Download/Spotube` on Android, `~/Descargas/Spotube` on Linux) when you have no internet — no external helper service needed.
+            - **Auto-Download on Heart (❤️):** Automatically queues and downloads any song you mark as Favorite (Me gusta).
+            - **Pagination Race Condition & Memory Fix:** Prevents concurrent `fetchAll()` loops from duplicating songs and eliminates recursive download queue memory leaks.
+          allowUpdates: true
+          artifacts: dist/Spotube-linux-x86_64.tar.xz
+
   build_android:
     runs-on: ubuntu-22.04
     steps:
@@ -76,16 +130,17 @@ jobs:
           name: Spotube-android-all-arch
           path: build/Spotube-android-all-arch.apk
 
-      - name: Publish GitHub Release
+      - name: Publish Android APK to GitHub Release
         uses: ncipollo/release-action@v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           tag: v5.1.2-offline
-          name: "v5.1.2-offline - Android APK (Offline Liked Songs & Auto-Download)"
+          name: "v5.1.2-offline - Android APK & Linux Desktop (Offline Liked Songs & Auto-Download)"
           body: |
-            Custom build of Spotube v5.1.2 for Android & Desktop with:
-            - **Offline Liked Songs (Canciones Favoritas):** Caches your Liked Songs locally and plays them directly from your Downloads folder (`/storage/emulated/0/Download/Spotube`) when you have no internet.
+            Custom build of Spotube v5.1.2 for Android & Linux Desktop with:
+            - **Download Status Badge in Liked Songs & Playlists:** Shows a Spotify-style green badge and status icon next to every song so you immediately see which tracks are downloaded and which are not.
+            - **100% Native Offline Liked Songs (Canciones Favoritas):** Caches your Liked Songs locally (`SharedPreferences`) and plays them directly from your Downloads folder (`/storage/emulated/0/Download/Spotube` on Android, `~/Descargas/Spotube` on Linux) when you have no internet — no external helper service needed.
             - **Auto-Download on Heart (❤️):** Automatically queues and downloads any song you mark as Favorite (Me gusta).
-            - **Pagination Race Condition Fix:** Prevents concurrent `fetchAll()` loops from duplicating songs exponentially.
+            - **Pagination Race Condition & Memory Fix:** Prevents concurrent `fetchAll()` loops from duplicating songs and eliminates recursive download queue memory leaks.
           allowUpdates: true
           artifacts: build/Spotube-android-all-arch.apk

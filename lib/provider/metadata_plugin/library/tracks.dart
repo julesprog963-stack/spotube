@@ -19,11 +19,45 @@ class MetadataPluginSavedTracksNotifier
   ) async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      List<SpotubeFullTrackObject> mergedItems = [...data.items];
+      final existingRaw = prefs.getString(_kOfflineSavedTracksCacheKey);
+      if (existingRaw != null && existingRaw.isNotEmpty) {
+        try {
+          final existingMap = jsonDecode(existingRaw) as Map<String, dynamic>;
+          final existing =
+              SpotubePaginationResponseObject<SpotubeFullTrackObject>.fromJson(
+            existingMap,
+            SpotubeFullTrackObject.fromJson,
+          );
+          final seenIds = mergedItems.map((e) => e.id).toSet();
+          for (final item in existing.items) {
+            if (seenIds.add(item.id)) {
+              mergedItems.add(item);
+            }
+          }
+        } catch (_) {}
+      }
       final jsonMap = {
-        'limit': data.limit,
-        'nextOffset': data.nextOffset,
-        'total': data.total,
-        'hasMore': data.hasMore,
+        'limit': mergedItems.length,
+        'nextOffset': null,
+        'total': data.total > mergedItems.length ? data.total : mergedItems.length,
+        'hasMore': false,
+        'items': mergedItems.map((e) => e.toJson()).toList(),
+      };
+      await prefs.setString(_kOfflineSavedTracksCacheKey, jsonEncode(jsonMap));
+    } catch (_) {}
+  }
+
+  Future<void> _saveExactOfflineCache(
+    SpotubePaginationResponseObject<SpotubeFullTrackObject> data,
+  ) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final jsonMap = {
+        'limit': data.items.length,
+        'nextOffset': null,
+        'total': data.items.length,
+        'hasMore': false,
         'items': data.items.map((e) => e.toJson()).toList(),
       };
       await prefs.setString(_kOfflineSavedTracksCacheKey, jsonEncode(jsonMap));
@@ -37,9 +71,17 @@ class MetadataPluginSavedTracksNotifier
       final raw = prefs.getString(_kOfflineSavedTracksCacheKey);
       if (raw == null || raw.isEmpty) return null;
       final map = jsonDecode(raw) as Map<String, dynamic>;
-      return SpotubePaginationResponseObject<SpotubeFullTrackObject>.fromJson(
+      final parsed =
+          SpotubePaginationResponseObject<SpotubeFullTrackObject>.fromJson(
         map,
         SpotubeFullTrackObject.fromJson,
+      );
+      return SpotubePaginationResponseObject<SpotubeFullTrackObject>(
+        limit: parsed.items.length,
+        nextOffset: null,
+        total: parsed.items.length,
+        hasMore: false,
+        items: parsed.items,
       );
     } catch (_) {
       return null;
@@ -53,14 +95,38 @@ class MetadataPluginSavedTracksNotifier
             offset: offset,
             limit: limit,
           );
-      if (offset == 0 && tracks.items.isNotEmpty) {
-        await _saveOfflineCache(tracks);
+      if (tracks.items.isNotEmpty) {
+        final currentItems = state.value?.items ?? <SpotubeFullTrackObject>[];
+        final seen = <String>{};
+        final combined = <SpotubeFullTrackObject>[];
+        for (final t in [...currentItems, ...tracks.items]) {
+          if (seen.add(t.id)) {
+            combined.add(t);
+          }
+        }
+        await _saveOfflineCache(
+          tracks.copyWith(items: combined),
+        );
       }
       return tracks;
     } catch (e) {
-      if (offset == 0) {
-        final cached = await _loadOfflineCache();
-        if (cached != null) return cached;
+      final cached = await _loadOfflineCache();
+      if (cached != null) {
+        if (offset == 0) {
+          return cached;
+        }
+        final existingIds =
+            (state.value?.items ?? []).map((e) => e.id).toSet();
+        final remaining = cached.items
+            .where((t) => !existingIds.contains(t.id))
+            .toList();
+        return SpotubePaginationResponseObject<SpotubeFullTrackObject>(
+          limit: remaining.length,
+          nextOffset: null,
+          total: cached.items.length,
+          hasMore: false,
+          items: remaining,
+        );
       }
       rethrow;
     }
@@ -72,7 +138,18 @@ class MetadataPluginSavedTracksNotifier
 
     try {
       await ref.watch(metadataPluginAuthenticatedProvider.future);
-      return await fetch(0, 20);
+      final firstPage = await fetch(0, 20);
+      if (firstPage.hasMore) {
+        Future.microtask(() async {
+          try {
+            final cached = await _loadOfflineCache();
+            if (cached == null || cached.items.length < firstPage.total) {
+              await fetchAll();
+            }
+          } catch (_) {}
+        });
+      }
+      return firstPage;
     } catch (e) {
       final cached = await _loadOfflineCache();
       if (cached != null) return cached;
@@ -124,7 +201,7 @@ class MetadataPluginSavedTracksNotifier
           .toList(),
     );
     state = AsyncData(updatedState);
-    await _saveOfflineCache(updatedState);
+    await _saveExactOfflineCache(updatedState);
 
     try {
       await (await metadataPlugin)

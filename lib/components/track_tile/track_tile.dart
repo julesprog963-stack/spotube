@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:auto_route/auto_route.dart';
+import 'package:collection/collection.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter_hooks/flutter_hooks.dart';
 
@@ -21,7 +22,47 @@ import 'package:spotube/models/metadata/metadata.dart';
 import 'package:spotube/provider/audio_player/querying_track_info.dart';
 import 'package:spotube/provider/audio_player/state.dart';
 import 'package:spotube/provider/blacklist_provider.dart';
+import 'package:spotube/provider/download_manager_provider.dart';
+import 'package:spotube/provider/user_preferences/user_preferences_provider.dart';
+import 'package:spotube/services/sourced_track/sourced_track.dart';
 import 'package:spotube/utils/platform.dart';
+
+enum TrackDownloadVisualStatus {
+  notDownloaded,
+  queuedOrDownloading,
+  downloaded,
+}
+
+final trackDownloadStatusProvider = Provider.autoDispose
+    .family<TrackDownloadVisualStatus, SpotubeTrackObject>((ref, track) {
+  if (track is SpotubeLocalTrackObject) {
+    return TrackDownloadVisualStatus.downloaded;
+  }
+  final taskStatus = ref.watch(
+    downloadManagerProvider.select(
+      (tasks) =>
+          tasks.firstWhereOrNull((t) => t.track.id == track.id)?.status,
+    ),
+  );
+  if (taskStatus == DownloadStatus.completed) {
+    return TrackDownloadVisualStatus.downloaded;
+  }
+  if (taskStatus == DownloadStatus.queued ||
+      taskStatus == DownloadStatus.downloading) {
+    return TrackDownloadVisualStatus.queuedOrDownloading;
+  }
+  final downloadLocation = ref.watch(
+    userPreferencesProvider.select((s) => s.downloadLocation),
+  );
+  final file = SourcedTrack.findDownloadedTrackFileSync(
+    track,
+    downloadLocation,
+  );
+  if (file != null) {
+    return TrackDownloadVisualStatus.downloaded;
+  }
+  return TrackDownloadVisualStatus.notDownloaded;
+});
 
 final isBlacklistedProvider =
     Provider.autoDispose.family<bool, SpotubeTrackObject>(
@@ -69,6 +110,7 @@ class TrackTile extends HookConsumerWidget {
     final theme = Theme.of(context);
 
     final isBlackListed = ref.watch(isBlacklistedProvider(track));
+    final downloadStatus = ref.watch(trackDownloadStatusProvider(track));
 
     final isLoading = useState(false);
 
@@ -294,32 +336,95 @@ class TrackTile extends HookConsumerWidget {
             ),
             subtitle: Align(
               alignment: Alignment.centerLeft,
-                    child: track is SpotubeLocalTrackObject
-                  ? Text(
-                      track.artists.asString(),
-                    )
-                  : ClipRect(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxHeight: 40),
-                          child: AbsorbPointer(
-                          absorbing: effectiveSelection,
-                          child: ArtistLink(
-                            artists: track.artists,
-                            onOverflowArtistClick: effectiveSelection
-                                ? () {}
-                                : () {
-                                    context.navigateTo(
-                                      TrackRoute(trackId: track.id),
-                                    );
-                                  },
-                          ),
-                        ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (downloadStatus ==
+                      TrackDownloadVisualStatus.downloaded) ...[
+                    Container(
+                      width: 14,
+                      height: 14,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF1DB954),
+                        shape: BoxShape.circle,
+                      ),
+                      alignment: Alignment.center,
+                      child: const Icon(
+                        SpotubeIcons.download,
+                        size: 9,
+                        color: Colors.black,
                       ),
                     ),
+                    const SizedBox(width: 5),
+                  ] else if (downloadStatus ==
+                      TrackDownloadVisualStatus.queuedOrDownloading) ...[
+                    const SizedBox(
+                      width: 12,
+                      height: 12,
+                      child: CircularProgressIndicator(),
+                    ),
+                    const SizedBox(width: 5),
+                  ],
+                  Flexible(
+                    child: track is SpotubeLocalTrackObject
+                        ? Text(
+                            track.artists.asString(),
+                          )
+                        : ClipRect(
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxHeight: 40),
+                              child: AbsorbPointer(
+                                absorbing: effectiveSelection,
+                                child: ArtistLink(
+                                  artists: track.artists,
+                                  onOverflowArtistClick: effectiveSelection
+                                      ? () {}
+                                      : () {
+                                          context.navigateTo(
+                                            TrackRoute(trackId: track.id),
+                                          );
+                                        },
+                                ),
+                              ),
+                            ),
+                          ),
+                  ),
+                ],
+              ),
             ),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
+                const SizedBox(width: 6),
+                switch (downloadStatus) {
+                  TrackDownloadVisualStatus.downloaded => const Icon(
+                      SpotubeIcons.done,
+                      size: 16,
+                      color: Color(0xFF1DB954),
+                    ),
+                  TrackDownloadVisualStatus.queuedOrDownloading =>
+                    const SizedBox(
+                      width: 15,
+                      height: 15,
+                      child: CircularProgressIndicator(),
+                    ),
+                  TrackDownloadVisualStatus.notDownloaded =>
+                    track is SpotubeFullTrackObject
+                        ? GestureDetector(
+                            onTap: () {
+                              ref
+                                  .read(downloadManagerProvider.notifier)
+                                  .addToQueue(track as SpotubeFullTrackObject);
+                            },
+                            child: Icon(
+                              SpotubeIcons.download,
+                              size: 15,
+                              color: theme.colorScheme.mutedForeground
+                                  .withAlpha(110),
+                            ),
+                          )
+                        : const SizedBox.shrink(),
+                },
                 const SizedBox(width: 8),
                 Text(
                   Duration(milliseconds: track.durationMs)
