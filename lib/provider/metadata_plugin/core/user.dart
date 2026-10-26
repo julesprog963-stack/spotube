@@ -18,7 +18,7 @@ Future<SpotubeUserObject> _loadOfflineUserFallback() async {
       );
     }
   } catch (_) {}
-  return const SpotubeUserObject(
+  return SpotubeUserObject(
     id: 'offline-user',
     name: 'Offline',
     images: [],
