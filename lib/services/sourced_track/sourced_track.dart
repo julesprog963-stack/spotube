@@ -51,7 +51,15 @@ class SourcedTrack extends BasicSourcedTrack {
         ),
       );
       if (await candidate.exists()) {
-        return candidate;
+        try {
+          if (await candidate.length() > 10240) {
+            return candidate;
+          } else {
+            try {
+              await candidate.delete();
+            } catch (_) {}
+          }
+        } catch (_) {}
       }
     }
     return null;
@@ -71,7 +79,15 @@ class SourcedTrack extends BasicSourcedTrack {
         ),
       );
       if (candidate.existsSync()) {
-        return candidate;
+        try {
+          if (candidate.lengthSync() > 10240) {
+            return candidate;
+          } else {
+            try {
+              candidate.deleteSync();
+            } catch (_) {}
+          }
+        } catch (_) {}
       }
     }
     return null;
@@ -149,25 +165,46 @@ class SourcedTrack extends BasicSourcedTrack {
         .then((s) => s.firstOrNull);
 
     if (cachedSource == null) {
-      if (downloadedFile != null) {
-        return SourcedTrack(
-          ref: ref,
-          siblings: [],
-          sources: _offlineFallbackStreams(),
-          info: SpotubeAudioSourceMatchObject(
-            id: query.id,
-            title: query.name,
-            artists: query.artists.map((e) => e.name).toList(),
-            duration: Duration(milliseconds: query.durationMs),
-            externalUri: query.externalUri,
-          ),
-          query: query,
-          source: audioSourceConfig.slug,
-        );
+      List<SpotubeAudioSourceMatchObject> siblings = [];
+      try {
+        siblings = await fetchSiblings(ref: ref, query: query);
+      } catch (e) {
+        if (downloadedFile != null) {
+          return SourcedTrack(
+            ref: ref,
+            siblings: [],
+            sources: _offlineFallbackStreams(),
+            info: SpotubeAudioSourceMatchObject(
+              id: query.id,
+              title: query.name,
+              artists: query.artists.map((e) => e.name).toList(),
+              duration: Duration(milliseconds: query.durationMs),
+              externalUri: query.externalUri,
+            ),
+            query: query,
+            source: "offline-download",
+          );
+        }
+        rethrow;
       }
 
-      final siblings = await fetchSiblings(ref: ref, query: query);
       if (siblings.isEmpty) {
+        if (downloadedFile != null) {
+          return SourcedTrack(
+            ref: ref,
+            siblings: [],
+            sources: _offlineFallbackStreams(),
+            info: SpotubeAudioSourceMatchObject(
+              id: query.id,
+              title: query.name,
+              artists: query.artists.map((e) => e.name).toList(),
+              duration: Duration(milliseconds: query.durationMs),
+              externalUri: query.externalUri,
+            ),
+            query: query,
+            source: "offline-download",
+          );
+        }
         throw TrackNotFoundError(query);
       }
 
@@ -179,7 +216,16 @@ class SourcedTrack extends BasicSourcedTrack {
             ),
           );
 
-      final manifest = await audioSource.audioSource.streams(siblings.first);
+      List<SpotubeAudioSourceStreamObject> manifest;
+      try {
+        manifest = await audioSource.audioSource.streams(siblings.first);
+      } catch (e) {
+        if (downloadedFile != null) {
+          manifest = _offlineFallbackStreams();
+        } else {
+          rethrow;
+        }
+      }
 
       return SourcedTrack(
         ref: ref,
@@ -194,13 +240,13 @@ class SourcedTrack extends BasicSourcedTrack {
       jsonDecode(cachedSource.sourceInfo),
     );
     List<SpotubeAudioSourceStreamObject> manifest;
-    if (downloadedFile != null) {
-      manifest = _offlineFallbackStreams();
-    } else {
-      try {
-        manifest = await audioSource.audioSource.streams(item);
-      } catch (e) {
+    try {
+      manifest = await audioSource.audioSource.streams(item);
+    } catch (e) {
+      if (downloadedFile != null) {
         manifest = _offlineFallbackStreams();
+      } else {
+        rethrow;
       }
     }
 

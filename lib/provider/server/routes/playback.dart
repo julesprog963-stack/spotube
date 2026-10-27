@@ -103,19 +103,19 @@ class ServerPlaybackRoutes {
 
     final localFile = await _getDownloadedOrCachedTrackFile(track);
 
-    if (localFile != null) {
+    if (localFile != null && await localFile.exists()) {
       final fileLength = await localFile.length();
-
-      return dio_lib.Response(
-        statusCode: 200,
-        headers: Headers.fromMap({
-          "content-type": ["audio/${track.qualityPreset?.name ?? 'm4a'}"],
-          "content-length": ["$fileLength"],
-          "accept-ranges": ["bytes"],
-          "content-range": ["bytes 0-$fileLength/$fileLength"],
-        }),
-        requestOptions: RequestOptions(path: request.requestedUri.toString()),
-      );
+      if (fileLength > 10240) {
+        return dio_lib.Response(
+          statusCode: 200,
+          headers: Headers.fromMap({
+            "content-type": ["audio/${track.qualityPreset?.name ?? 'm4a'}"],
+            "content-length": ["$fileLength"],
+            "accept-ranges": ["bytes"],
+          }),
+          requestOptions: RequestOptions(path: request.requestedUri.toString()),
+        );
+      }
     }
 
     String url = track.url ??
@@ -151,24 +151,22 @@ class ServerPlaybackRoutes {
 
     final localFile = await _getDownloadedOrCachedTrackFile(track);
 
-    if (localFile != null) {
+    if (localFile != null && await localFile.exists()) {
       final bytes = await localFile.readAsBytes();
       final cachedFileLength = bytes.length;
-
-      return dio_lib.Response<Uint8List>(
-        statusCode: 200,
-        headers: Headers.fromMap({
-          "content-type": ["audio/${track.qualityPreset?.name ?? 'm4a'}"],
-          "content-length": ["${cachedFileLength - 1}"],
-          "accept-ranges": ["bytes"],
-          "content-range": [
-            "bytes 0-${cachedFileLength - 1}/$cachedFileLength"
-          ],
-          "connection": ["close"],
-        }),
-        requestOptions: RequestOptions(path: request.requestedUri.toString()),
-        data: bytes,
-      );
+      if (cachedFileLength > 10240) {
+        return dio_lib.Response<Uint8List>(
+          statusCode: 200,
+          headers: Headers.fromMap({
+            "content-type": ["audio/${track.qualityPreset?.name ?? 'm4a'}"],
+            "content-length": ["$cachedFileLength"],
+            "accept-ranges": ["bytes"],
+            "connection": ["close"],
+          }),
+          requestOptions: RequestOptions(path: request.requestedUri.toString()),
+          data: bytes,
+        );
+      }
     }
 
     final trackCacheFile = File(await _getTrackCacheFilePath(track));

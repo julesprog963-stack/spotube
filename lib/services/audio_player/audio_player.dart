@@ -17,9 +17,9 @@ part 'audio_player_impl.dart';
 
 class SpotubeMedia extends mk.Media {
   static int serverPort = 0;
+  static String downloadLocation = "";
 
-  static String get _host =>
-      kIsWindows ? "localhost" : InternetAddress.anyIPv4.address;
+  static String get _host => "127.0.0.1";
 
   final SpotubeTrackObject track;
   SpotubeMedia(this.track)
@@ -27,13 +27,30 @@ class SpotubeMedia extends mk.Media {
           track is SpotubeLocalTrackObject || track is SpotubeFullTrackObject,
           "Track must be a either a local track or a full track object with ISRC",
         ),
-        // If the track is a local track, use its path, otherwise use the server URL
         super(
-          track is SpotubeLocalTrackObject
-              ? track.path
-              : "http://$_host:$serverPort/stream/${track.id}",
+          _resolveUri(track),
           extras: track.toJson(),
         );
+
+  static String _resolveUri(SpotubeTrackObject track) {
+    if (track is SpotubeLocalTrackObject) {
+      return track.path;
+    }
+    if (downloadLocation.isNotEmpty) {
+      try {
+        final localFile = SourcedTrack.findDownloadedTrackFileSync(
+          track,
+          downloadLocation,
+        );
+        if (localFile != null &&
+            localFile.existsSync() &&
+            localFile.lengthSync() > 10240) {
+          return localFile.path;
+        }
+      } catch (_) {}
+    }
+    return "http://$_host:$serverPort/stream/${track.id}";
+  }
 
   factory SpotubeMedia.media(Media media) {
     assert(media.extras != null, "[Media] must have extra metadata set");

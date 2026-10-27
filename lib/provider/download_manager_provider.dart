@@ -201,24 +201,41 @@ class DownloadManagerNotifier extends Notifier<List<DownloadTask>> {
 
       final savePathFile = File(savePath);
       if (await savePathFile.exists()) {
-        if (!await _shouldReplaceFileOnExist(task)) {
-          _setStatus(task.track, DownloadStatus.completed);
-          return;
+        final length = await savePathFile.length();
+        if (length > 10240) {
+          if (!await _shouldReplaceFileOnExist(task)) {
+            _setStatus(task.track, DownloadStatus.completed);
+            return;
+          }
         }
-        await savePathFile.delete();
+        try {
+          await savePathFile.delete();
+        } catch (_) {}
         ref.invalidate(sourcedTrackProvider(task.track));
       }
 
-      final track = await ref.read(sourcedTrackProvider(task.track).future);
+      var track = await ref.read(sourcedTrackProvider(task.track).future);
       if (task.cancelToken.isCancelled) {
         _setStatus(task.track, DownloadStatus.canceled);
         return;
       }
 
-      final url = track.getUrlOfQuality(
+      var url = track.getUrlOfQuality(
         container,
         presets.selectedDownloadingQualityIndex,
       );
+
+      if (url == null || url.startsWith("http://127.0.0.1:1/")) {
+        try {
+          track = await ref
+              .read(sourcedTrackProvider(task.track).notifier)
+              .refreshStreamingUrl();
+          url = track.getUrlOfQuality(
+            container,
+            presets.selectedDownloadingQualityIndex,
+          );
+        } catch (_) {}
+      }
 
       if (url == null || url.startsWith("http://127.0.0.1:1/")) {
         throw Exception("No download URL found for selected codec");

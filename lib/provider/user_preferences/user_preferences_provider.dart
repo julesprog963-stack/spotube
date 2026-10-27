@@ -36,6 +36,7 @@ class UserPreferencesNotifier extends Notifier<PreferencesTableData> {
       state = await (db.select(db.preferencesTable)
             ..where((tbl) => tbl.id.equals(0)))
           .getSingle();
+      SpotubeMedia.downloadLocation = state.downloadLocation;
 
       final subscription = (db.select(db.preferencesTable)
             ..where((tbl) => tbl.id.equals(0)))
@@ -43,6 +44,7 @@ class UserPreferencesNotifier extends Notifier<PreferencesTableData> {
           .listen((event) async {
         try {
           state = event;
+          SpotubeMedia.downloadLocation = event.downloadLocation;
 
           if (kIsDesktop) {
             await windowManager.setTitleBarStyle(
