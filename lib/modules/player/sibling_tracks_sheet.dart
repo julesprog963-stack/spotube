@@ -14,16 +14,18 @@ import 'package:spotube/provider/server/sourced_track_provider.dart';
 
 class SiblingTracksSheet extends HookConsumerWidget {
   final bool floating;
+  final SpotubeFullTrackObject? customTrack;
   const SiblingTracksSheet({
     super.key,
     this.floating = true,
+    this.customTrack,
   });
 
   @override
   Widget build(BuildContext context, ref) {
     final controller = useScrollController();
 
-    final activeTrack =
+    final activeTrack = customTrack ??
         ref.watch(audioPlayerProvider.select((e) => e.activeTrack));
 
     if (activeTrack == null || activeTrack is! SpotubeFullTrackObject) {
@@ -128,16 +130,25 @@ class SiblingTracksSheet extends HookConsumerWidget {
                                   sourcedTrack.asData?.value.info.id) {
                             await sourcedTrackNotifier
                                 .swapWithSibling(sourceInfo);
-                            await ref
-                                .read(audioPlayerProvider.notifier)
-                                .swapActiveSource();
+                            final currentActive =
+                                ref.read(audioPlayerProvider).activeTrack;
+                            if (currentActive?.id == activeTrack.id) {
+                              await ref
+                                  .read(audioPlayerProvider.notifier)
+                                  .swapActiveSource();
+                            }
 
                             if (context.mounted) {
-                              if (MediaQuery.sizeOf(context).mdAndUp) {
-                                closeOverlay(context);
-                              } else {
-                                closeDrawer(context);
-                              }
+                              try {
+                                if (MediaQuery.sizeOf(context).mdAndUp) {
+                                  closeOverlay(context);
+                                } else {
+                                  closeDrawer(context);
+                                }
+                              } catch (_) {}
+                              try {
+                                Navigator.of(context).maybePop();
+                              } catch (_) {}
                             }
                           }
                         },

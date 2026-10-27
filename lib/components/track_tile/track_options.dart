@@ -8,6 +8,7 @@ import 'package:spotube/components/ui/button_tile.dart';
 import 'package:spotube/extensions/constrains.dart';
 import 'package:spotube/extensions/context.dart';
 import 'package:spotube/models/metadata/metadata.dart';
+import 'package:spotube/modules/player/sibling_tracks_sheet.dart';
 import 'package:spotube/provider/track_options/track_options_provider.dart';
 
 /// [track] must be a [SpotubeFullTrackObject] or [SpotubeLocalTrackObject]
@@ -224,6 +225,58 @@ class TrackOptions extends HookConsumerWidget {
                   )
                 : const Icon(SpotubeIcons.download),
             title: Text(context.l10n.download_track),
+          ),
+        if (!isLocalTrack && track is SpotubeFullTrackObject)
+          ButtonTile(
+            style: ButtonVariance.menu,
+            onPressed: () {
+              onTapItem?.call();
+              final fullTrack = track as SpotubeFullTrackObject;
+              final screenSize = MediaQuery.sizeOf(context);
+              if (screenSize.mdAndUp) {
+                showPopover(
+                  alignment: Alignment.center,
+                  context: context,
+                  builder: (context) {
+                    return SurfaceCard(
+                      padding: EdgeInsets.zero,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(
+                          maxHeight: 600,
+                          maxWidth: 500,
+                        ),
+                        child: SiblingTracksSheet(
+                          floating: false,
+                          customTrack: fullTrack,
+                        ),
+                      ),
+                    );
+                  },
+                );
+              } else {
+                openDrawer(
+                  context: context,
+                  position: OverlayPosition.bottom,
+                  draggable: true,
+                  showDragHandle: true,
+                  borderRadius: context.theme.borderRadiusMd,
+                  transformBackdrop: false,
+                  builder: (context) {
+                    return ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxHeight: MediaQuery.sizeOf(context).height * 0.75,
+                      ),
+                      child: SiblingTracksSheet(
+                        floating: false,
+                        customTrack: fullTrack,
+                      ),
+                    );
+                  },
+                );
+              }
+            },
+            leading: const Icon(SpotubeIcons.alternativeRoute),
+            title: Text(context.l10n.alternative_track_sources),
           ),
         if (!isLocalTrack)
           ButtonTile(

@@ -164,99 +164,134 @@ class SourcedTrack extends BasicSourcedTrack {
         .get()
         .then((s) => s.firstOrNull);
 
-    if (cachedSource == null) {
-      List<SpotubeAudioSourceMatchObject> siblings = [];
-      try {
-        siblings = await fetchSiblings(ref: ref, query: query);
-      } catch (e) {
-        if (downloadedFile != null) {
-          return SourcedTrack(
-            ref: ref,
-            siblings: [],
-            sources: _offlineFallbackStreams(),
-            info: SpotubeAudioSourceMatchObject(
-              id: query.id,
-              title: query.name,
-              artists: query.artists.map((e) => e.name).toList(),
-              duration: Duration(milliseconds: query.durationMs),
-              externalUri: query.externalUri,
-            ),
-            query: query,
-            source: "offline-download",
-          );
-        }
-        rethrow;
-      }
-
-      if (siblings.isEmpty) {
-        if (downloadedFile != null) {
-          return SourcedTrack(
-            ref: ref,
-            siblings: [],
-            sources: _offlineFallbackStreams(),
-            info: SpotubeAudioSourceMatchObject(
-              id: query.id,
-              title: query.name,
-              artists: query.artists.map((e) => e.name).toList(),
-              duration: Duration(milliseconds: query.durationMs),
-              externalUri: query.externalUri,
-            ),
-            query: query,
-            source: "offline-download",
-          );
-        }
-        throw TrackNotFoundError(query);
-      }
-
-      await database.into(database.sourceMatchTable).insert(
-            SourceMatchTableCompanion.insert(
-              trackId: query.id,
-              sourceInfo: Value(jsonEncode(siblings.first)),
-              sourceType: audioSourceConfig.slug,
-            ),
-          );
-
-      List<SpotubeAudioSourceStreamObject> manifest;
-      try {
-        manifest = await audioSource.audioSource.streams(siblings.first);
-      } catch (e) {
-        if (downloadedFile != null) {
-          manifest = _offlineFallbackStreams();
-        } else {
-          rethrow;
-        }
-      }
-
-      return SourcedTrack(
-        ref: ref,
-        siblings: siblings.skip(1).toList(),
-        info: siblings.first,
-        source: audioSourceConfig.slug,
-        sources: manifest,
-        query: query,
+    if (cachedSource != null) {
+      final item = SpotubeAudioSourceMatchObject.fromJson(
+        jsonDecode(cachedSource.sourceInfo),
       );
+      try {
+        final manifest = await audioSource.audioSource.streams(item);
+        if (manifest.isNotEmpty) {
+          final sourcedTrack = SourcedTrack(
+            ref: ref,
+            siblings: [],
+            sources: manifest,
+            info: item,
+            query: query,
+            source: audioSourceConfig.slug,
+          );
+
+          AppLogger.log.i("${query.name}: ${sourcedTrack.url}");
+
+          return sourcedTrack;
+        }
+      } catch (e) {
+        AppLogger.log.w(
+          "Cached source failed for ${query.name} (${item.id}): $e. Removing bad cache and checking siblings.",
+        );
+        try {
+          await (database.sourceMatchTable.delete()
+                ..where((s) =>
+                    s.trackId.equals(query.id) &
+                    s.sourceType.equals(audioSourceConfig.slug)))
+              .go();
+        } catch (_) {}
+      }
     }
-    final item = SpotubeAudioSourceMatchObject.fromJson(
-      jsonDecode(cachedSource.sourceInfo),
-    );
-    List<SpotubeAudioSourceStreamObject> manifest;
+
+    List<SpotubeAudioSourceMatchObject> siblings = [];
     try {
-      manifest = await audioSource.audioSource.streams(item);
+      siblings = await fetchSiblings(ref: ref, query: query);
     } catch (e) {
       if (downloadedFile != null) {
-        manifest = _offlineFallbackStreams();
-      } else {
-        rethrow;
+        return SourcedTrack(
+          ref: ref,
+          siblings: [],
+          sources: _offlineFallbackStreams(),
+          info: SpotubeAudioSourceMatchObject(
+            id: query.id,
+            title: query.name,
+            artists: query.artists.map((e) => e.name).toList(),
+            duration: Duration(milliseconds: query.durationMs),
+            externalUri: query.externalUri,
+          ),
+          query: query,
+          source: "offline-download",
+        );
+      }
+      rethrow;
+    }
+
+    if (siblings.isEmpty) {
+      if (downloadedFile != null) {
+        return SourcedTrack(
+          ref: ref,
+          siblings: [],
+          sources: _offlineFallbackStreams(),
+          info: SpotubeAudioSourceMatchObject(
+            id: query.id,
+            title: query.name,
+            artists: query.artists.map((e) => e.name).toList(),
+            duration: Duration(milliseconds: query.durationMs),
+            externalUri: query.externalUri,
+          ),
+          query: query,
+          source: "offline-download",
+        );
+      }
+      throw TrackNotFoundError(query);
+    }
+
+    SpotubeAudioSourceMatchObject? workingSibling;
+    List<SpotubeAudioSourceStreamObject>? manifest;
+
+    for (final sibling in siblings) {
+      try {
+        final streams = await audioSource.audioSource.streams(sibling);
+        if (streams.isNotEmpty) {
+          workingSibling = sibling;
+          manifest = streams;
+          break;
+        }
+      } catch (e) {
+        AppLogger.log.w(
+          "Sibling ${sibling.id} (${sibling.title}) failed for ${query.name}: $e",
+        );
       }
     }
+
+    if (workingSibling == null || manifest == null || manifest.isEmpty) {
+      if (downloadedFile != null) {
+        return SourcedTrack(
+          ref: ref,
+          siblings: siblings,
+          sources: _offlineFallbackStreams(),
+          info: siblings.first,
+          query: query,
+          source: "offline-download",
+        );
+      }
+      throw TrackNotFoundError(query);
+    }
+
+    await database.into(database.sourceMatchTable).insert(
+          SourceMatchTableCompanion.insert(
+            trackId: query.id,
+            sourceInfo: Value(jsonEncode(workingSibling)),
+            sourceType: audioSourceConfig.slug,
+          ),
+          mode: InsertMode.replace,
+        );
+
+    final remainingSiblings =
+        siblings.where((s) => s.id != workingSibling.id).toList();
 
     final sourcedTrack = SourcedTrack(
       ref: ref,
-      siblings: [],
-      sources: manifest,
-      info: item,
-      query: query,
+      siblings: remainingSiblings,
+      info: workingSibling,
       source: audioSourceConfig.slug,
+      sources: manifest,
+      query: query,
     );
 
     AppLogger.log.i("${query.name}: ${sourcedTrack.url}");

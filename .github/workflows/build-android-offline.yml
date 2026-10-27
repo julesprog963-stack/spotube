@@ -98,15 +98,17 @@ jobs:
           flutter pub get
           dart cli/cli.dart install-dependencies --platform=android --arch=all
 
-      - name: Generate Release Keystore
+      - name: Setup Release Keystore
         run: |
-          keytool -genkeypair -v \
-            -keystore android/app/upload-keystore.jks \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -alias upload \
-            -storepass spotube123 \
-            -keypass spotube123 \
-            -dname "CN=Spotube, OU=Dev, O=Spotube, L=City, S=State, C=MX"
+          if [ ! -f android/app/upload-keystore.jks ]; then
+            keytool -genkeypair -v \
+              -keystore android/app/upload-keystore.jks \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -alias upload \
+              -storepass spotube123 \
+              -keypass spotube123 \
+              -dname "CN=Spotube, OU=Dev, O=Spotube, L=City, S=State, C=MX"
+          fi
           cat << 'EOF' > android/key.properties
           storePassword=spotube123
           keyPassword=spotube123
