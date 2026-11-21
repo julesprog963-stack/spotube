@@ -12,6 +12,26 @@ Edición comunitaria no oficial para Android, basada en [Spotube v6.0.0](https:/
 - **Tema Verde oscuro.** Disponible en Ajustes → Apariencia → Tema.
 - **Reproducción y estabilidad.** Reutiliza la cola cuando la fuente de la siguiente pista sigue siendo válida y corrige el cierre al guardar pantallas como Me gusta al pasar a segundo plano.
 
+## Cómo usar las funciones nuevas
+
+1. **Escuchar sin internet.** Con conexión, abre Biblioteca → Playlists o Me gusta y deja cargar las páginas que quieras consultar luego. Cuando vuelvas sin internet, la biblioteca puede mostrar la copia guardada. Para escuchar una pista, busca el icono de descarga. El icono indica que Spotube reconoce un archivo local para esa entrada.
+2. **Descargar una canción.** Abre su menú de tres puntos y elige **Descargar**. La barra en la fila muestra cuánto se ha transferido. En **Biblioteca → Descargas** puedes revisar las descargas activas, completadas y fallidas.
+3. **Descargar y mantener una playlist.** Dentro de la playlist, toca el botón **Descargar playlist**, debajo de **Reproducir** y **Aleatorio**. Activa **Descargar playlist** en el panel. En Android, **Solo por Wi-Fi** viene activado al habilitar la descarga automática. Spotube descarga las pistas que le faltan y revisa periódicamente si hay nuevas mientras la app está en ejecución.
+4. **Descargar al marcar Me gusta.** Al guardar una canción nueva en favoritos, Spotube intenta ponerla en la cola automáticamente si aún no reconoce un archivo local. Activar esta función en esta edición no inicia una descarga masiva de todos los favoritos anteriores.
+5. **Cambiar el tema.** En **Ajustes → Apariencia → Tema**, selecciona **Verde oscuro**.
+
+### Archivos de instalaciones anteriores
+
+En Android, la carpeta predeterminada es `Download/Spotube`. Spotube puede reconocer archivos antiguos por título, artista, álbum y duración. Distintas ediciones de una canción pueden tener el mismo título y quedar asociadas a entradas separadas. Las descargas nuevas conservan el vínculo con la pista concreta, incluso cuando el proveedor entrega audio con una duración distinta. Si una descarga encuentra un destino existente, usa un nombre distinto y compara las dos copias. Si son idénticas, reutiliza el archivo original. Si los archivos difieren, conserva ambos.
+
+### Qué se comprobó en Android
+
+- El APK ARM64 se instaló y abrió en un Samsung Galaxy S22+.
+- Me gusta abrió y reprodujo una canción descargada con Wi-Fi y datos móviles apagados.
+- Una playlist de 89 pistas quedó disponible localmente. Spotube descargó 88 y reconoció la que ya estaba guardada.
+- Al pasar Me gusta a segundo plano y volver tres veces, Spotube conservó la pantalla y no registró otro cierre. La corrección registra también las rutas de Letras, Control remoto y Ajustes de Jam.
+- Al seleccionar otra pista de la misma playlist, Spotube reutilizó la cola cuando seguía siendo válida. El tiempo de inicio de pistas que requieren internet también depende del proveedor.
+
 ## Capturas de Android
 
 | Descarga de playlist | Pistas disponibles sin conexión |
