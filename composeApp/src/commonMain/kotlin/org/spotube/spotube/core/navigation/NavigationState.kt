@@ -65,6 +65,10 @@ val serializersConfig = SavedStateConfiguration {
             subclass(Routes.Jam::class, Routes.Jam.serializer())
             subclass(Routes.Welcome::class, Routes.Welcome.serializer())
             subclass(Routes.LocalFolder::class, Routes.LocalFolder.serializer())
+            subclass(Routes.JamSettings::class, Routes.JamSettings.serializer())
+            subclass(Routes.Lyrics::class, Routes.Lyrics.serializer())
+            subclass(Routes.RemoteControl::class, Routes.RemoteControl.serializer())
+            subclass(Routes.SavedTracks::class, Routes.SavedTracks.serializer())
         }
     }
 }

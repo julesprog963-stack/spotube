@@ -17,8 +17,10 @@
 
 package org.spotube.spotube.core.audioplayer
 
+import org.spotube.plugin_interfaces.plugin_apis.metadata.track.MetadataTrack
 import org.spotube.plugin_interfaces.plugin_apis.audio.StreamProtocol
 import org.spotube.spotube.core.di.injectLogger
+import org.spotube.spotube.modules.library.local_tracks.media.LocalMediaLibraryCoordinator
 import org.spotube.spotube.modules.blacklist.BlacklistRepository
 import org.spotube.spotube.modules.library.local_tracks.media.LocalMediaCacheRepository
 import org.spotube.spotube.modules.plugin.PluginProvider
@@ -43,12 +45,19 @@ import org.koin.core.component.get
 import kotlin.random.Random
 import kotlin.time.Duration.Companion.milliseconds
 
+fun interface PlaybackConnectivity {
+    fun hasInternet(): Boolean
+    fun hasWifi(): Boolean = false
+}
+
 class DeviceAudioPlayerQueue(
     private val audioPlayer: AudioPlayerInterface,
     private val settingsProvider: SettingsProvider,
     private val repository: QueueStateRepository,
     private val pluginProvider: PluginProvider,
-    private val blacklistRepository: BlacklistRepository) : AudioPlayerQueue, KoinComponent {
+    private val blacklistRepository: BlacklistRepository,
+    private val localMediaLibrary: LocalMediaLibraryCoordinator? = null,
+    private val connectivity: PlaybackConnectivity? = null) : AudioPlayerQueue, KoinComponent {
 
     private val logger by injectLogger<DeviceAudioPlayerQueue>()
 
@@ -58,6 +67,7 @@ class DeviceAudioPlayerQueue(
     private val currentCollectionEntryState = MutableStateFlow<QueueCollectionEntry?>(null)
     private val collectionHistoryState = MutableStateFlow<List<QueueCollectionEntry>>(emptyList())
 
+    private var loadedOffline: Boolean? = null
     private var isRestoringPersistedState = true
 
     // Eagerly: callers read `.value` (the stream proxy looks up the track it's asked to play,
@@ -133,17 +143,23 @@ class DeviceAudioPlayerQueue(
         startPosition: Int,
         collectionEntry: QueueCollectionEntry?) {
         logger.i { "Loading queue with ${entries.size} entries, autoPlay=$autoPlay, startPosition=$startPosition" }
-        val resolved = resolveMediaItems(entries)
-        val mediaItems = resolved.map { it.first }
-        if (mediaItems.isEmpty()) {
-            logger.w { "load: no valid media items after filtering blanks" }
+        val offline = connectivity?.hasInternet() == false
+        val indexedItems = entries.mapIndexedNotNull { index, entry ->
+            entry.toMediaItem(localOnly = offline)?.let { Triple(index, it, entry) }
         }
-        val normalizedStartPosition =
-            if (mediaItems.isEmpty()) 0 else startPosition.coerceIn(0, mediaItems.lastIndex)
+        if (indexedItems.isEmpty()) {
+            logger.w { "load: no playable media items" }
+            return
+        }
+        val resolved = indexedItems.map { (_, item, entry) -> item to entry }
+        val mediaItems = resolved.map { it.first }
+        val normalizedStartPosition = indexedItems.indexOfFirst { it.first >= startPosition }
+            .takeIf { it >= 0 } ?: indexedItems.lastIndex
         logger.d { "Normalized start position: $startPosition -> $normalizedStartPosition" }
         entryByMediaUrl.value = entriesByUrl(resolved)
         updateCollectionContext(collectionEntry)
         audioPlayer.load(mediaItems, autoPlay, normalizedStartPosition)
+        loadedOffline = offline
         persistQueueStateIfReady()
         logger.i { "Queue loaded successfully" }
     }
@@ -253,6 +269,24 @@ class DeviceAudioPlayerQueue(
             audioPlayer.play()
         }
         persistQueueStateIfReady()
+    }
+
+    override suspend fun tryPlayQueuedTrack(collection: QueueCollectionEntry, track: MetadataTrack): Boolean {
+        val offline = connectivity?.hasInternet() == false
+        if (loadedOffline != offline || currentCollectionEntryFlow.value != collection) return false
+        val items = audioPlayer.playlistFlow.value
+        val entries = entryByMediaUrl.value
+        val index = items.indexOfFirst { item ->
+            (entries[item.url] as? QueueEntry.StreamingTrack)?.track?.id == track.id
+        }
+        if (index < 0 || track.id.isBlank()) return false
+        val item = items[index]
+        val entry = entries[item.url] as? QueueEntry.StreamingTrack ?: return false
+        val currentSource = entry.copy(track = track).toMediaItem(localOnly = offline) ?: return false
+        if (currentSource.url != item.url || currentSource.protocol != item.protocol) return false
+        logger.d { "Reusing collection queue for selected track ${track.id}" }
+        jumpTo(index)
+        return true
     }
 
     override suspend fun reloadCurrent() {
@@ -512,10 +546,12 @@ class DeviceAudioPlayerQueue(
         }
     }
 
-    private suspend fun QueueEntry.toMediaItem(): MediaItem? {
+    private suspend fun QueueEntry.toMediaItem(localOnly: Boolean = false): MediaItem? {
         return when (this) {
             is QueueEntry.StreamingTrack -> {
-                val resolvedUrl = url.ifBlank { buildStreamingUrl(track.id, protocol) }
+                val local = if (url.isBlank()) localMediaLibrary?.findMatchingTrack(track) else null
+                if (localOnly && local == null) return null
+                val resolvedUrl = local?.path ?: url.ifBlank { buildStreamingUrl(track.id, protocol) }
                 if (resolvedUrl.isBlank()) return null
                 MediaItem(
                     title = track.title,
@@ -524,7 +560,7 @@ class DeviceAudioPlayerQueue(
                     duration = track.durationMs.milliseconds,
                     coverURL = artworkUrl.orEmpty(),
                     url = resolvedUrl,
-                    protocol = protocol)
+                    protocol = if (local == null) protocol else StreamProtocol.PROGRESSIVE)
             }
 
             is QueueEntry.LocalTrack -> {

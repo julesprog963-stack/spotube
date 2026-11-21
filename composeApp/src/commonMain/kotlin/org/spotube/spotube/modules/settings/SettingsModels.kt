@@ -25,7 +25,7 @@ import org.spotube.millennium.theme.MillenniumPalette
 
 @Serializable
 enum class Theme {
-    LIGHT, DARK, SYSTEM
+    LIGHT, DARK, SYSTEM, DARK_GREEN
 }
 
 @Serializable

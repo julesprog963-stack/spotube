@@ -30,7 +30,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.filterNotNull
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
@@ -112,18 +112,23 @@ class LibraryPlaylistsViewModel(
         viewModelScope.launch {
             combine(
                 repository.pluginManager.selectedMetadataPlugin
-                    .filterNotNull()
-                    .flatMapLatest { it.loggedInFlow }
+                    .flatMapLatest { it?.loggedInFlow ?: flowOf(false) }
                     .distinctUntilChanged(),
-                repository.savedPlaylistIdsFlow
-            ) { _, _ -> }.collect {
+                repository.savedPlaylistIdsFlow,
+                repository.pluginManager.state
+            ) { _, _, _ -> }.collect {
                 loadInitialData()
             }
         }
     }
 
     private suspend fun loadInitialData() = runCatching {
-        _state.value = LibraryPlaylistsState.Loading
+        repository.cachedSavedPlaylists()?.let { cached ->
+            if (_state.value !is LibraryPlaylistsState.Data) {
+                _state.value = LibraryPlaylistsState.Data.Loaded(
+                    allItems = cached.items, nextPagination = cached.nextPagination)
+            }
+        }
         val result = repository.savedPlaylists()
         _state.value = LibraryPlaylistsState.Data.Loaded(
             allItems = result?.items ?: emptyList(),
@@ -131,7 +136,9 @@ class LibraryPlaylistsViewModel(
         )
     }.onFailure { e ->
         logger.e(e) { "Failed to load playlists" }
-        _state.value = LibraryPlaylistsState.Error(e.message ?: getString(Res.string.common_unknown_error))
+        if (_state.value !is LibraryPlaylistsState.Data) {
+            _state.value = LibraryPlaylistsState.Error(e.message ?: getString(Res.string.common_unknown_error))
+        }
     }
 
     suspend fun loadMoreData() = runCatching {

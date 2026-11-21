@@ -71,6 +71,12 @@ class Database(val paths: Paths) {
         )
     }
 
+    val offlineLibraryDataStore: DataStore<Preferences> by lazy {
+        PreferenceDataStoreFactory.createWithPath(
+            produceFile = { "${paths.getApplicationDataDirPath()}/spotube_offline_library.preferences_pb".toPath() }
+        )
+    }
+
     val blacklistDataStore: DataStore<Preferences> by lazy {
         PreferenceDataStoreFactory.createWithPath(
             produceFile = { "${paths.getApplicationDataDirPath()}/spotube_blacklist.preferences_pb".toPath() }

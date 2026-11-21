@@ -17,6 +17,15 @@
 
 package org.spotube.spotube.modules.library.local_tracks.media
 
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
+import okio.FileSystem
+import okio.Path.Companion.toPath
+import okio.SYSTEM
+import org.spotube.spotube.core.db.Database
 import org.spotube.spotube.core.di.injectLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,7 +34,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -35,12 +43,31 @@ import org.koin.core.component.KoinComponent
 class LocalMediaLibraryCoordinator(
     private val discoveryService: LocalMediaDiscoveryService,
     private val cacheRepository: LocalMediaCacheRepository,
-    private val foldersConfig: LocalMediaFoldersConfig) : KoinComponent {
+    private val foldersConfig: LocalMediaFoldersConfig,
+    private val database: Database) : KoinComponent {
     private val logger by injectLogger<LocalMediaLibraryCoordinator>()
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
     private val _cacheState = MutableStateFlow(LocalMediaCache())
-    val cacheState: StateFlow<LocalMediaCache> = _cacheState.asStateFlow()
+    private val downloadKeyPrefix = "download-path:"
+    val cacheState: StateFlow<LocalMediaCache> = combine(
+        _cacheState, database.offlineLibraryDataStore.data
+    ) { cache, preferences ->
+        val downloadPaths = preferences.asMap().mapNotNull { (key, value) ->
+            if (key.name.startsWith(downloadKeyPrefix) && value is String) {
+                key.name.removePrefix(downloadKeyPrefix) to value
+            } else null
+        }.toMap()
+        cache.copy(downloadPaths = downloadPaths)
+    }.stateIn(scope, SharingStarted.Eagerly, LocalMediaCache())
+
+    suspend fun registerDownloadedTrack(trackId: String, path: String) {
+        if (trackId.isNotBlank()) {
+            database.offlineLibraryDataStore.edit {
+                it[stringPreferencesKey(downloadKeyPrefix + trackId)] = path
+            }
+        }
+    }
 
     private var observation: LocalMediaObservation? = null
     private var periodicJob: Job? = null
@@ -72,6 +99,36 @@ class LocalMediaLibraryCoordinator(
                 refreshIfStale()
             }
         }
+    }
+
+    fun findMatchingTrack(
+        track: org.spotube.plugin_interfaces.plugin_apis.metadata.track.MetadataTrack,
+        cache: LocalMediaCache = cacheState.value
+    ): LocalMediaTrack? {
+        cache.downloadPaths[track.id]?.let { path ->
+            val metadata = runCatching { FileSystem.SYSTEM.metadataOrNull(path.toPath()) }.getOrNull()
+            if (metadata?.isRegularFile == true && (metadata.size ?: 0) > 0) {
+                return LocalMediaTrack(
+                    path = path,
+                    name = track.title,
+                    artists = track.artists.map { it.name },
+                    durationMs = track.durationMs,
+                    album = track.album?.title)
+            }
+        }
+        val album = track.album?.title ?: return null
+        val artists = track.artists.joinToString(", ") { it.name }
+        if (artists.isBlank() || track.durationMs <= 0) return null
+        return cache.folders.asSequence().flatMap { it.tracks.asSequence() }
+            .filter { local ->
+                local.name.equals(track.title, ignoreCase = true) &&
+                    local.album.equals(album, ignoreCase = true) &&
+                    local.artists.joinToString(", ").equals(artists, ignoreCase = true) &&
+                    local.durationMs > 0 &&
+                    kotlin.math.abs(local.durationMs - track.durationMs) <= 2000
+            }
+            .distinctBy { it.path }
+            .take(2).toList().singleOrNull()
     }
 
     fun scheduleRefresh(reason: String) {

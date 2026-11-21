@@ -106,11 +106,28 @@ class PlaylistViewModel(
     private val blacklistRepository: BlacklistRepository,
     private val shareService: ShareService,
     private val downloadManager: DownloadManager,
-    private val remotePlaybackController: RemotePlaybackController) : ViewModel(), KoinComponent {
+    private val remotePlaybackController: RemotePlaybackController,
+    private val playlistDownloads: PlaylistDownloads) : ViewModel(), KoinComponent {
     private val logger by injectLogger<PlaylistViewModel>()
 
     private val _state = MutableStateFlow<PlaylistScreenState>(PlaylistScreenState.Loading)
     val uiState: StateFlow<PlaylistScreenState> = _state.asStateFlow()
+
+    val playlistDownloadMode = playlistDownloads.mode(playlistId)
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+    val supportsWifiOnlyDownloads = playlistDownloads.supportsWifiOnly
+
+    fun setPlaylistAutoDownload(enabled: Boolean) {
+        playlistDownloads.setMode(
+            playlistId,
+            if (!enabled) null else if (supportsWifiOnlyDownloads) PlaylistDownloadMode.Wifi
+            else PlaylistDownloadMode.AnyConnection)
+    }
+
+    fun setPlaylistDownloadWifiOnly(wifiOnly: Boolean) {
+        playlistDownloads.setMode(
+            playlistId, if (wifiOnly) PlaylistDownloadMode.Wifi else PlaylistDownloadMode.AnyConnection)
+    }
 
     /** Loading flags for this screen's play / shuffle / add-to-queue buttons. */
     val playbackUiState: StateFlow<CollectionPlaybackUiState> = remotePlaybackController
@@ -180,7 +197,6 @@ class PlaylistViewModel(
         val playlistInfo = repository.getPlaylistInfo(playlistId)
         val tracksResult = repository.getPlaylistTracks(playlistId)
 
-        tracksResult?.items?.let { savedTracksRepository.isSavedTracks(it.map { item -> item.id }) }
         _state.value = PlaylistScreenState.Data.Loaded(
             playlist = playlistInfo?.first,
             isSaved = playlistInfo?.second ?: false,
@@ -191,23 +207,24 @@ class PlaylistViewModel(
         _state.value = PlaylistScreenState.Error(e.message ?: getString(Res.string.common_unknown_error))
     }
 
-    suspend fun loadMoreTracks() = runCatching {
-        val currentState = _state.value
-        if (currentState is PlaylistScreenState.Data.Loaded && currentState.nextPagination != null) {
-            _state.value = currentState.toLoadingMore()
-            val result = repository.getPlaylistTracks(playlistId, currentState.nextPagination)
-
-            result?.items?.let { savedTracksRepository.isSavedTracks(it.map { item -> item.id }) }
+    suspend fun loadMoreTracks() {
+        val currentState = _state.value as? PlaylistScreenState.Data.Loaded ?: return
+        val next = currentState.nextPagination ?: return
+        _state.value = currentState.toLoadingMore()
+        try {
+            val result = repository.getPlaylistTracks(playlistId, next)
             _state.value = PlaylistScreenState.Data.Loaded(
                 playlist = currentState.playlist,
                 isSaved = currentState.isSaved,
-                tracks = currentState.tracks + (result?.items ?: emptyList()),
+                tracks = currentState.tracks + result?.items.orEmpty(),
                 nextPagination = result?.nextPagination,
                 isSaving = currentState.isSaving)
+        } catch (e: kotlinx.coroutines.CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            logger.e(e) { "Failed to load more tracks" }
+            _state.value = currentState
         }
-    }.onFailure { e ->
-        logger.e(e) { "Failed to load more tracks" }
-        _state.value = PlaylistScreenState.Error(e.message ?: getString(Res.string.common_unknown_error))
     }
 
     fun loadNextTracksPage() {

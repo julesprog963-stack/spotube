@@ -19,6 +19,7 @@ package org.spotube.spotube.core.playback
 
 import org.spotube.plugin_interfaces.plugin_apis.metadata.track.MetadataTrack
 import org.spotube.spotube.core.audioplayer.AudioPlayerQueue
+import kotlinx.coroutines.CancellationException
 import org.spotube.spotube.core.audioplayer.QueueCollectionEntry
 import org.spotube.spotube.core.audioplayer.QueueEntry
 import org.spotube.spotube.modules.album.AlbumRepository
@@ -116,17 +117,9 @@ class CollectionPlaybackHelper(
     }
 
     suspend fun playPlaylistFromTrack(playlistId: String, track: MetadataTrack) {
+        if (audioPlayerQueue.tryPlayQueuedTrack(QueueCollectionEntry.Playlist(playlistId), track)) return
         val entries = fetchAllPlaylistTracks(playlistId)
         if (entries.isEmpty()) return
-
-        val queue = audioPlayerQueue.getQueue()
-        val queueIndex = queue.indexOfFirst { entry ->
-            (entry as? QueueEntry.StreamingTrack)?.track?.matchesTrack(track) == true
-        }
-        if (queueIndex >= 0) {
-            audioPlayerQueue.jumpTo(queueIndex)
-            return
-        }
 
         val startPosition = entries.indexOfFirst { entry ->
             (entry as? QueueEntry.StreamingTrack)?.track?.matchesTrack(track) == true
@@ -200,17 +193,9 @@ class CollectionPlaybackHelper(
     }
 
     suspend fun playSavedTracksFromTrack(track: MetadataTrack) {
+        if (audioPlayerQueue.tryPlayQueuedTrack(QueueCollectionEntry.SavedTracks, track)) return
         val entries = fetchAllSavedTracks()
         if (entries.isEmpty()) return
-
-        val queue = audioPlayerQueue.getQueue()
-        val queueIndex = queue.indexOfFirst { entry ->
-            (entry as? QueueEntry.StreamingTrack)?.track?.matchesTrack(track) == true
-        }
-        if (queueIndex >= 0) {
-            audioPlayerQueue.jumpTo(queueIndex)
-            return
-        }
 
         val startPosition = entries.indexOfFirst { entry ->
             (entry as? QueueEntry.StreamingTrack)?.track?.matchesTrack(track) == true
@@ -250,7 +235,13 @@ class CollectionPlaybackHelper(
         pagination?.items?.let { allTracks.addAll(it) }
 
         while (pagination?.nextPagination != null) {
-            pagination = playlistRepository.getPlaylistTracks(playlistId, pagination.nextPagination)
+            pagination = try {
+                playlistRepository.getPlaylistTracks(playlistId, pagination.nextPagination)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                break
+            }
             pagination?.items?.let { allTracks.addAll(it) }
         }
 
@@ -289,7 +280,13 @@ class CollectionPlaybackHelper(
         pagination?.items?.let { allTracks.addAll(it) }
 
         while (pagination?.nextPagination != null) {
-            pagination = savedTracksRepository.getSavedTracks(pagination.nextPagination)
+            pagination = try {
+                savedTracksRepository.getSavedTracks(pagination.nextPagination)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                break
+            }
             pagination?.items?.let { allTracks.addAll(it) }
         }
 

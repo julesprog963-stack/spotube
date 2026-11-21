@@ -19,6 +19,10 @@ package org.spotube.spotube.modules.playlist
 
 
 import androidx.compose.ui.Alignment
+import androidx.compose.foundation.layout.Column
+import org.spotube.millennium.composables.MillenniumSwitch
+import spotube.composeapp.generated.resources.playlist_auto_download
+import spotube.composeapp.generated.resources.playlist_download_wifi_only
 import org.spotube.millennium.composables.MillenniumIcon
 import org.spotube.millennium.composables.MillenniumButton
 import org.spotube.millennium.composables.MillenniumButtonStyle
@@ -45,7 +49,11 @@ import org.spotube.spotube.core.jam.JamRole
 import org.spotube.spotube.core.jam.JamRoomService
 import org.koin.compose.koinInject
 import org.spotube.spotube.core.navigation.Routes
+import org.spotube.spotube.core.ui.component.AdaptiveDialogBottomSheet
 import org.spotube.spotube.core.ui.component.CollectionView
+import org.spotube.spotube.core.ui.theming.AppTheme
+import org.spotube.spotube.resources.iconsax.IconsaxDirectboxReceive
+import spotube.composeapp.generated.resources.playlist_download_options
 import org.spotube.spotube.modules.library.playlist.AddToPlaylistPicker
 import org.spotube.spotube.modules.library.playlist.PlaylistFormData
 import org.spotube.spotube.modules.library.playlist.PlaylistFormSheet
@@ -66,6 +74,7 @@ fun PlaylistScreen(
     navigationCommands: NavigationCommands
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val downloadMode by viewModel.playlistDownloadMode.collectAsStateWithLifecycle()
     val playbackUiState by viewModel.playbackUiState.collectAsStateWithLifecycle()
     val jamRoomService: JamRoomService = koinInject()
     val jamActive by jamRoomService.role.map { it != null }
@@ -80,6 +89,7 @@ fun PlaylistScreen(
     val showAddToPlaylistPicker by viewModel.showAddToPlaylistPicker.collectAsStateWithLifecycle()
     val editPlaylistFormState by viewModel.editPlaylistFormState.collectAsStateWithLifecycle()
     var showAddTracksDialog by remember { mutableStateOf(false) }
+    var showDownloadOptions by remember { mutableStateOf(false) }
 
     val dataState = state as? PlaylistScreenState.Data
     val playlist = dataState?.playlist
@@ -159,7 +169,47 @@ fun PlaylistScreen(
         isJamGuest = isJamGuest,
         onAddToJam = viewModel::addTracksToJam,
         footerContent = footerContent,
+        headerActions = if (playlist == null) null else {
+            {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                    MillenniumButton(
+                        onClick = { showDownloadOptions = true },
+                        style = MillenniumButtonStyle.Secondary
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            MillenniumIcon(imageVector = Iconsax.IconsaxDirectboxReceive, contentDescription = null)
+                            Text(stringResource(if (downloadMode == null) Res.string.playlist_auto_download
+                                else Res.string.playlist_download_options))
+                        }
+                    }
+                }
+            }
+        },
         trailingContent = {
+            if (showDownloadOptions) {
+                val title = stringResource(Res.string.playlist_download_options)
+                AdaptiveDialogBottomSheet(
+                    onDismiss = { showDownloadOptions = false },
+                    dialogTitle = title,
+                    title = { Text(title, style = AppTheme.typography.headlineSmall) }
+                ) {
+                    Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)) {
+                        PlaylistDownloadSwitch(
+                            label = stringResource(Res.string.playlist_auto_download),
+                            checked = downloadMode != null,
+                            onCheckedChange = viewModel::setPlaylistAutoDownload)
+                        if (downloadMode != null && viewModel.supportsWifiOnlyDownloads) {
+                            PlaylistDownloadSwitch(
+                                label = stringResource(Res.string.playlist_download_wifi_only),
+                                checked = downloadMode == PlaylistDownloadMode.Wifi,
+                                onCheckedChange = viewModel::setPlaylistDownloadWifiOnly)
+                        }
+                    }
+                }
+            }
             val loadedPlaylist = (dataState as? PlaylistScreenState.Data.Loaded)?.playlist
             PlaylistFormSheet(
                 visible = editPlaylistFormState.isVisible,
@@ -191,4 +241,17 @@ fun PlaylistScreen(
                     viewModel.refresh()
                 })
         })
+}
+
+
+@Composable
+private fun PlaylistDownloadSwitch(label: String, checked: Boolean, onCheckedChange: (Boolean) -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().padding(vertical = 6.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(label, modifier = Modifier.weight(1f).padding(end = 12.dp))
+        MillenniumSwitch(checked = checked, onCheckedChange = onCheckedChange, contentSpacing = 0.dp)
+    }
 }

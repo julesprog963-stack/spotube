@@ -23,6 +23,11 @@ import org.spotube.plugin_interfaces.plugin_apis.metadata.playlist.MetadataPlayl
 import org.spotube.plugin_interfaces.plugin_apis.metadata.track.MetadataTrack
 import org.spotube.spotube.modules.library.LibraryRepository
 import org.spotube.spotube.modules.plugin.PluginManager
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import kotlinx.coroutines.CancellationException
+import kotlinx.serialization.json.Json
+import org.spotube.spotube.core.db.Database
 import io.github.reactivecircus.cache4k.Cache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,7 +42,8 @@ import kotlinx.coroutines.launch
 @OptIn(ExperimentalCoroutinesApi::class)
 class PlaylistRepository(
     val pluginManager: PluginManager,
-    private val libraryRepository: LibraryRepository) {
+    private val libraryRepository: LibraryRepository,
+    private val database: Database) {
     val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
     val plugin
@@ -68,29 +74,50 @@ class PlaylistRepository(
 
     suspend fun getPlaylistInfo(playlistId: String) = plugin?.let { plugin ->
         playlistInfoCache.get(playlistId) {
-            pluginManager.withScope {
-                plugin.use {
-                    val playlist = metadataPlaylistAPI.getPlaylist(playlistId)
-                    val isSaved = libraryRepository.isSavedPlaylists(listOf(playlistId)).firstOrNull() ?: false
-                    playlist to isSaved
+            mirrored("playlist:${plugin.pluginId}:$playlistId:info") {
+                pluginManager.withScope {
+                    plugin.use {
+                        val playlist = metadataPlaylistAPI.getPlaylist(playlistId)
+                        val isSaved = libraryRepository.isSavedPlaylists(listOf(playlistId)).firstOrNull() ?: false
+                        playlist to isSaved
+                    }
                 }
             }
         }
     }
 
-    suspend fun getPlaylistTracks(playlistId: String, paginationStrategy: PaginationStrategy? = null) =
-        plugin?.let { plugin ->
-            playlistTracksCache.get(playlistId to (paginationStrategy ?: PaginationStrategy.Offset(0, 20))) {
+    suspend fun getPlaylistTracks(
+        playlistId: String,
+        paginationStrategy: PaginationStrategy? = null,
+        refresh: Boolean = false
+    ): PaginationResult<MetadataTrack>? = plugin?.let { active ->
+        val key = playlistId to (paginationStrategy ?: PaginationStrategy.Offset(0, 20))
+        if (refresh) playlistTracksCache.invalidate(key)
+        playlistTracksCache.get(key) {
+            mirrored("playlist:${active.pluginId}:$playlistId:${Json.encodeToString(paginationStrategy)}") {
                 pluginManager.withScope {
-                    plugin.use {
-                        metadataPlaylistAPI.getPlaylistTracks(
-                            id = playlistId,
-                            pagination = paginationStrategy
-                        )
+                    active.use {
+                        metadataPlaylistAPI.getPlaylistTracks(id = playlistId, pagination = paginationStrategy)
                     }
                 }
             }
         }
+    }
+
+    private suspend inline fun <reified T> mirrored(keyName: String, fetch: () -> T): T {
+        val key = stringPreferencesKey(keyName)
+        val store = database.offlineLibraryDataStore
+        return try {
+            val result = fetch()
+            store.edit { it[key] = Json.encodeToString(result) }
+            result
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            val cached = store.data.first()[key] ?: throw e
+            Json.decodeFromString<T>(cached)
+        }
+    }
 
     suspend fun toggleSavedPlaylist(playlistId: String, currentIsSaved: Boolean) = plugin?.let { plugin ->
         if (currentIsSaved) {

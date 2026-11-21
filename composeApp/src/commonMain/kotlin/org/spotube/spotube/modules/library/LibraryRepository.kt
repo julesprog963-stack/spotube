@@ -24,6 +24,14 @@ import org.spotube.plugin_interfaces.plugin_apis.metadata.common.PaginationStrat
 import org.spotube.plugin_interfaces.plugin_apis.metadata.playlist.MetadataPlaylist
 import org.spotube.plugin_interfaces.plugin_apis.metadata.user.MetadataUser
 import org.spotube.spotube.modules.plugin.PluginManager
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
+import kotlinx.serialization.json.Json
+import org.spotube.spotube.core.db.Database
+import org.spotube.spotube.modules.plugin.PluginAbility
+import org.spotube.spotube.modules.plugin.PluginManagerStates
 import io.github.reactivecircus.cache4k.Cache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -39,7 +47,8 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class LibraryRepository(
-    val pluginManager: PluginManager
+    val pluginManager: PluginManager,
+    private val database: Database
 ) {
     val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
@@ -88,20 +97,40 @@ class LibraryRepository(
         savedArtistIds.value = emptySet()
     }
 
-    suspend fun savedPlaylists(paginationStrategy: PaginationStrategy? = null) =
-        authPlugin?.let { plugin ->
-            playlistCache.get(
-                key = paginationStrategy ?: PaginationStrategy.Offset(0, 20)
-            ) {
-                pluginManager.withScope {
-                    plugin.use {
-                        val result = metadataPlaylistAPI.savedPlaylists(paginationStrategy)
-                        savedPlaylistIds.value += result.items.map { it.id }.toSet()
-                        result
-                    }
+    val configuredMetadataPluginId: String?
+        get() = (pluginManager.state.value as? PluginManagerStates.Data)
+            ?.selectedPlugins?.get(PluginAbility.METADATA)?.id
+
+    private fun savedPlaylistsKey(pluginId: String, strategy: PaginationStrategy?) =
+        stringPreferencesKey("saved-playlists:$pluginId:${Json.encodeToString(strategy)}")
+
+    suspend fun cachedSavedPlaylists(strategy: PaginationStrategy? = null): PaginationResult<MetadataPlaylist>? {
+        val pluginId = configuredMetadataPluginId ?: return null
+        val encoded = database.offlineLibraryDataStore.data.first()[savedPlaylistsKey(pluginId, strategy)]
+            ?: return null
+        return Json.decodeFromString<PaginationResult<MetadataPlaylist>>(encoded)
+    }
+
+    suspend fun savedPlaylists(paginationStrategy: PaginationStrategy? = null): PaginationResult<MetadataPlaylist>? {
+        val active = authPlugin ?: return cachedSavedPlaylists(paginationStrategy)
+        val strategy = paginationStrategy ?: PaginationStrategy.Offset(0, 20)
+        return try {
+            playlistCache.get(strategy) {
+                val result = pluginManager.withScope {
+                    active.use { metadataPlaylistAPI.savedPlaylists(paginationStrategy) }
                 }
+                database.offlineLibraryDataStore.edit {
+                    it[savedPlaylistsKey(active.pluginId, paginationStrategy)] = Json.encodeToString(result)
+                }
+                savedPlaylistIds.value += result.items.map { it.id }
+                result
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            cachedSavedPlaylists(paginationStrategy) ?: throw e
         }
+    }
 
     suspend fun savedAlbums(paginationStrategy: PaginationStrategy? = null) =
         authPlugin?.let { plugin ->

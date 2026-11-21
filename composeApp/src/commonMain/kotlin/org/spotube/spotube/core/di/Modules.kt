@@ -22,6 +22,7 @@ import org.spotube.spotube.core.network.HttpClientFactory
 import co.touchlab.kermit.Logger
 import org.spotube.spotube.core.audioplayer.AudioPlayerQueue
 import org.spotube.spotube.core.audioplayer.AudioPlayerQueueRepository
+import org.spotube.spotube.core.audioplayer.PlaybackConnectivity
 import org.spotube.spotube.core.audioplayer.DeviceAudioPlayerQueue
 import org.spotube.spotube.core.audioplayer.QueueStateRepository
 import org.spotube.spotube.core.db.Database
@@ -71,6 +72,7 @@ import org.spotube.spotube.modules.library.playlist.LibraryPlaylistsViewModel
 import org.spotube.spotube.modules.lyrics.LyricsViewModel
 import org.spotube.spotube.modules.playlist.AddTracksToPlaylistViewModel
 import org.spotube.spotube.modules.playlist.PlaylistRepository
+import org.spotube.spotube.modules.playlist.PlaylistDownloads
 import org.spotube.spotube.modules.playlist.PlaylistViewModel
 import org.spotube.spotube.modules.plugin.AudioPluginSource
 import org.spotube.spotube.modules.plugin.PluginManager
@@ -177,11 +179,13 @@ val sharedModules = module {
     single { PluginUpdateService(get(), get()) } withOptions { createdAtStart() }
 
     // Downloads
-    singleOf(::DownloadManager)
+    single { DownloadManager(get(), get(), get(), get(), get(), getOrNull<PlaybackConnectivity>()) }
     viewModelOf(::DownloadsViewModel)
 
     // Playlist
     singleOf(::PlaylistRepository)
+    single { PlaylistDownloads(get(), get(), get(), get(), getOrNull<PlaybackConnectivity>()) }
+        .withOptions { createdAtStart() }
     viewModel { (playlistId: String) ->
         PlaylistViewModel(
             playlistId = playlistId,
@@ -193,7 +197,8 @@ val sharedModules = module {
             blacklistRepository = get(),
             shareService = get(),
             downloadManager = get(),
-            remotePlaybackController = get())
+            remotePlaybackController = get(),
+            playlistDownloads = get())
     }
     viewModel { (playlistId: String) -> AddTracksToPlaylistViewModel(playlistId, get(), get()) }
 
@@ -296,7 +301,7 @@ val sharedModules = module {
     }
     singleOf(::AudioPlayerQueueRepository) { bind<QueueStateRepository>() }
     single<AudioPlayerQueue> {
-        DeviceAudioPlayerQueue(get(), get(), get(), get(), get())
+        DeviceAudioPlayerQueue(get(), get(), get(), get(), get(), get(), getOrNull<PlaybackConnectivity>())
     }
 
     single { DiscordRpcService(get(), get()) } withOptions { createdAtStart() }

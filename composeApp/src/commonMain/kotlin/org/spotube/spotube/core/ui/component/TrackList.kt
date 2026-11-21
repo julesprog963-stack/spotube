@@ -19,6 +19,13 @@ package org.spotube.spotube.core.ui.component
 
 
 
+import org.spotube.millennium.composables.MillenniumStripedProgress
+import org.spotube.spotube.modules.downloads.DownloadManager
+import org.spotube.spotube.modules.downloads.DownloadStatus
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import org.koin.compose.koinInject
+import org.spotube.spotube.modules.library.local_tracks.media.LocalMediaLibraryCoordinator
+import spotube.composeapp.generated.resources.player_download_status_downloaded
 import com.composeunstyled.currentWindowWidthBreakpoint
 import org.spotube.millennium.adaptive.WindowBreakpoints
 import androidx.compose.animation.AnimatedContent
@@ -629,6 +636,16 @@ private fun TrackListRow(
     onAlbumClick: (MetadataAlbum.Detailed) -> Unit,
     onArtistsOverflowClick: () -> Unit,
     modifier: Modifier = Modifier) {
+    val localLibrary: LocalMediaLibraryCoordinator = koinInject()
+    val localCache by localLibrary.cacheState.collectAsStateWithLifecycle()
+    val isDownloaded = remember(localCache, track) {
+        localLibrary.findMatchingTrack(track, localCache) != null
+    }
+    val downloadManager: DownloadManager = koinInject()
+    val downloads by downloadManager.downloadsFlow.collectAsStateWithLifecycle()
+    val downloadProgress = downloads.firstOrNull {
+        it.track?.id == track.id && it.status == DownloadStatus.Downloading
+    }?.progress
     val artworkInteractionSource = remember { MutableInteractionSource() }
     val isArtworkHovered by artworkInteractionSource.collectIsHoveredAsState()
     val rowInteractionSource = remember { MutableInteractionSource() }
@@ -646,17 +663,35 @@ private fun TrackListRow(
         selected = isSelected || isCurrentTrack,
         onClick = onTrackClick,
         title = {
-            TextWithShimmer(
-                text = track.title,
-                style = AppTheme.typography.bodyLarge,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                if (isDownloaded) {
+                    MillenniumIcon(
+                        imageVector = Iconsax.IconsaxDirectboxReceive,
+                        contentDescription = stringResource(Res.string.player_download_status_downloaded),
+                        modifier = Modifier.size(16.dp))
+                }
+                TextWithShimmer(
+                    text = track.title,
+                    style = AppTheme.typography.bodyLarge,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis)
+            }
         },
         subtitle = {
-            ArtistChips(
-                artists = track.artists,
-                onArtistClick = onArtistClick,
-                onArtistsOverflowClick = onArtistsOverflowClick)
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                ArtistChips(
+                    artists = track.artists,
+                    onArtistClick = onArtistClick,
+                    onArtistsOverflowClick = onArtistsOverflowClick)
+                downloadProgress?.let { progress ->
+                    MillenniumStripedProgress(
+                        progress = progress.coerceIn(0f, 1f),
+                        modifier = Modifier.width(104.dp),
+                        height = 4.dp)
+                }
+            }
         },
         leading = {
             Row(

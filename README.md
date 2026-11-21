@@ -1,3 +1,11 @@
+## Spotube 2.0
+
+Edición comunitaria no oficial para Android, basada en Spotube 6.0.0. Añade biblioteca sin conexión, reproducción desde descargas, descarga automática de playlists, un tema Verde oscuro y mejoras de estabilidad.
+
+[Ver mejoras y capturas](docs/spotube-2.0/README.md) · [Descargar el APK ARM64](https://github.com/julesprog963-stack/spotube/releases/tag/v2.0)
+
+Gracias a Kingkor Roy Tirtho, al equipo de Spotube y a quienes crearon y mantienen el proyecto original.
+
 <div align="center">
   <img width="600" src="assets/branding/spotube_banner.png" alt="Spotube Logo">
 

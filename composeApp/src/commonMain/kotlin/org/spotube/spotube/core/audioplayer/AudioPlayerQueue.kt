@@ -18,6 +18,7 @@
 package org.spotube.spotube.core.audioplayer
 
 import kotlinx.coroutines.flow.StateFlow
+import org.spotube.plugin_interfaces.plugin_apis.metadata.track.MetadataTrack
 
 interface AudioPlayerQueue {
 	val queueFlow: StateFlow<List<QueueEntry>>
@@ -37,6 +38,7 @@ interface AudioPlayerQueue {
 	suspend fun removeFromQueueByMediaUrl(mediaUrl: String)
 	suspend fun move(fromIndex: Int, toIndex: Int)
 	suspend fun jumpTo(index: Int, autoPlay: Boolean = true)
+	suspend fun tryPlayQueuedTrack(collection: QueueCollectionEntry, track: MetadataTrack): Boolean = false
 	suspend fun reloadCurrent()
 	suspend fun clear()
 	suspend fun getQueue(): List<QueueEntry>

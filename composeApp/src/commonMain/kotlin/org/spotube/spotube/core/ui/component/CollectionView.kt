@@ -101,6 +101,7 @@ fun CollectionView(
     onAddToJam: (List<MetadataTrack>) -> Unit = {},
     trackOptionsState: (MetadataTrack) -> TrackOptionsState = { TrackOptionsState() },
     footerContent: (@Composable () -> Unit)? = null,
+    headerActions: (@Composable () -> Unit)? = null,
     trailingContent: @Composable () -> Unit = {}) {
     val listState = rememberLazyListState()
     val isCollapsed by remember {
@@ -149,14 +150,40 @@ fun CollectionView(
                 modifier = Modifier.fillMaxSize(),
                 state = listState,
                 headerContent = {
-                    if (isLoading && tracks.isEmpty()) {
-                        org.spotube.spotube.core.ui.misc.SkeletonTree(true) {
+                    Column {
+                        if (isLoading && tracks.isEmpty()) {
+                            org.spotube.spotube.core.ui.misc.SkeletonTree(true) {
+                                CollectionDetails(
+                                    title = title.ifBlank { stringResource(Res.string.common_loading) },
+                                    description = description,
+                                    imageURL = imageURL,
+                                    imageResource = imageResource,
+                                    ownerName = ownerName.ifBlank { stringResource(Res.string.common_unknown) },
+                                    ownerImageURL = ownerImageURL,
+                                    onOwnerClick = onOwnerClick,
+                                    onPlay = onPlay,
+                                    onShufflePlay = onShufflePlay,
+                                    onAddToQueue = onAddToQueue,
+                                    isPlaying = isPlaying,
+                                    isFollowing = isFollowing,
+                                    isFollowLoading = isFollowLoading,
+                                    isPlayLoading = isPlayLoading,
+                                    isShuffleLoading = isShuffleLoading,
+                                    isAddToQueueLoading = isAddToQueueLoading,
+                                    onFollowClick = onFollowClick,
+                                    showFollowButton = showFollowButton,
+                                    onEdit = onEdit,
+                                    sharedElementKey = sharedElementKey,
+                                    isJamGuest = isJamGuest,
+                                    onAddToJam = { onAddToJam(tracks) })
+                            }
+                        } else {
                             CollectionDetails(
-                                title = title.ifBlank { stringResource(Res.string.common_loading) },
+                                title = title,
                                 description = description,
                                 imageURL = imageURL,
                                 imageResource = imageResource,
-                                ownerName = ownerName.ifBlank { stringResource(Res.string.common_unknown) },
+                                ownerName = ownerName,
                                 ownerImageURL = ownerImageURL,
                                 onOwnerClick = onOwnerClick,
                                 onPlay = onPlay,
@@ -175,30 +202,7 @@ fun CollectionView(
                                 isJamGuest = isJamGuest,
                                 onAddToJam = { onAddToJam(tracks) })
                         }
-                    } else {
-                        CollectionDetails(
-                            title = title,
-                            description = description,
-                            imageURL = imageURL,
-                            imageResource = imageResource,
-                            ownerName = ownerName,
-                            ownerImageURL = ownerImageURL,
-                            onOwnerClick = onOwnerClick,
-                            onPlay = onPlay,
-                            onShufflePlay = onShufflePlay,
-                            onAddToQueue = onAddToQueue,
-                            isPlaying = isPlaying,
-                            isFollowing = isFollowing,
-                            isFollowLoading = isFollowLoading,
-                            isPlayLoading = isPlayLoading,
-                            isShuffleLoading = isShuffleLoading,
-                            isAddToQueueLoading = isAddToQueueLoading,
-                            onFollowClick = onFollowClick,
-                            showFollowButton = showFollowButton,
-                            onEdit = onEdit,
-                            sharedElementKey = sharedElementKey,
-                            isJamGuest = isJamGuest,
-                            onAddToJam = { onAddToJam(tracks) })
+                        headerActions?.invoke()
                     }
                 },
                 footerContent = footerContent,

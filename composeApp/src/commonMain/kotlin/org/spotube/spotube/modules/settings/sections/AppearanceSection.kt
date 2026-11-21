@@ -121,6 +121,7 @@ internal fun LazyListScope.appearanceSection(
 private fun Theme.displayLabel(): String {
     return when (this) {
         Theme.LIGHT -> stringResource(Res.string.settings_theme_light)
+        Theme.DARK_GREEN -> stringResource(Res.string.settings_theme_dark_green)
         Theme.DARK -> stringResource(Res.string.settings_theme_dark)
         Theme.SYSTEM -> stringResource(Res.string.settings_theme_system)
     }

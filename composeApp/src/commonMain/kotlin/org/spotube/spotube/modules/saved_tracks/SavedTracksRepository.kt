@@ -21,6 +21,14 @@ import org.spotube.plugin_interfaces.plugin_apis.metadata.common.PaginationResul
 import org.spotube.plugin_interfaces.plugin_apis.metadata.common.PaginationStrategy
 import org.spotube.plugin_interfaces.plugin_apis.metadata.track.MetadataTrack
 import org.spotube.spotube.modules.plugin.PluginManager
+import co.touchlab.kermit.Logger
+import org.spotube.spotube.modules.downloads.DownloadManager
+import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.stringPreferencesKey
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
+import kotlinx.serialization.json.Json
+import org.spotube.spotube.core.db.Database
 import io.github.reactivecircus.cache4k.Cache
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -36,7 +44,9 @@ import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class SavedTracksRepository(
-    val pluginManager: PluginManager
+    val pluginManager: PluginManager,
+    private val database: Database,
+    private val downloadManager: DownloadManager
 ) {
     val scope = CoroutineScope(Dispatchers.Default + SupervisorJob())
 
@@ -82,20 +92,35 @@ class SavedTracksRepository(
         _libraryChanges.value++
     }
 
-    suspend fun getSavedTracks(paginationStrategy: PaginationStrategy? = null) =
-        authPlugin?.let { plugin ->
-            val strategy = paginationStrategy ?: PaginationStrategy.Offset(0, 50)
+    private fun pageKey(pluginId: String, strategy: PaginationStrategy?) =
+        stringPreferencesKey("$pluginId:${Json.encodeToString(strategy)}")
+
+    suspend fun cachedSavedTracks(strategy: PaginationStrategy? = null): PaginationResult<MetadataTrack>? {
+        val pluginId = plugin?.pluginId ?: return null
+        val encoded = database.offlineLibraryDataStore.data.first()[pageKey(pluginId, strategy)] ?: return null
+        return Json.decodeFromString<PaginationResult<MetadataTrack>>(encoded)
+    }
+
+    suspend fun getSavedTracks(paginationStrategy: PaginationStrategy? = null): PaginationResult<MetadataTrack>? {
+        val active = authPlugin ?: return cachedSavedTracks(paginationStrategy)
+        val strategy = paginationStrategy ?: PaginationStrategy.Offset(0, 50)
+        return try {
             savedTracksCache.get(strategy) {
                 val tracks = pluginManager.withScope {
-                    plugin.use {
-                        val tracks = metadataTrackAPI.savedTracks(paginationStrategy)
-                        tracks
-                    }
+                    active.use { metadataTrackAPI.savedTracks(paginationStrategy) }
                 }
-                savedTrackIds.value += tracks.items.map { it.id }.toSet()
+                database.offlineLibraryDataStore.edit { prefs ->
+                    prefs[pageKey(active.pluginId, paginationStrategy)] = Json.encodeToString(tracks)
+                }
+                savedTrackIds.value += tracks.items.map { it.id }
                 tracks
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            cachedSavedTracks(paginationStrategy) ?: throw e
         }
+    }
 
     suspend fun getSavedTracksCount(): Int? = plugin?.let { plugin ->
         totalCountCache.get("count") {
@@ -119,6 +144,20 @@ class SavedTracksRepository(
             totalCountCache.invalidateAll()
             savedTrackIds.value += ids.toSet()
             _libraryChanges.value++
+            ids.distinct().forEach { id ->
+                scope.launch {
+                    try {
+                        val track = pluginManager.withScope {
+                            plugin.use { metadataTrackAPI.getTrack(id) }
+                        }
+                        downloadManager.enqueue(track)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        Logger.withTag("SavedTracksRepository").w(e) { "Could not queue download for saved track $id" }
+                    }
+                }
+            }
         }
     }
 

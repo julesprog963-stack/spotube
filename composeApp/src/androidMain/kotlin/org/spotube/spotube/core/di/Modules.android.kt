@@ -18,6 +18,9 @@
 package org.spotube.spotube.core.di
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import org.spotube.spotube.core.audioplayer.PlaybackConnectivity
 import org.spotube.spotube.core.audioplayer.AudioPlayer
 import org.spotube.spotube.core.audioplayer.AudioPlayerInterface
 import org.spotube.spotube.core.paths.Paths
@@ -29,6 +32,20 @@ import org.spotube.spotube.modules.library.local_tracks.media.LocalMediaDiscover
 import org.koin.dsl.module
 
 actual val platformModules = module {
+    single<PlaybackConnectivity> {
+        val manager = get<Context>().getSystemService(ConnectivityManager::class.java)
+        object : PlaybackConnectivity {
+            private fun capabilities() =
+                manager.activeNetwork?.let(manager::getNetworkCapabilities)
+            override fun hasInternet() =
+                capabilities()?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true
+            override fun hasWifi() =
+                capabilities()?.let {
+                    it.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) &&
+                        it.hasTransport(NetworkCapabilities.TRANSPORT_WIFI)
+                } == true
+        }
+    }
     single { Paths() }
     single<AudioPlayerInterface> { AudioPlayer(get<Context>()) }
     single<LocalMediaDiscoveryService> { AndroidLocalMediaDiscoveryService(get()) }

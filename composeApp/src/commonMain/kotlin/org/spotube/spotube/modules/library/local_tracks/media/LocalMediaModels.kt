@@ -40,4 +40,5 @@ data class LocalMediaFolder(
 @Serializable
 data class LocalMediaCache(
     val folders: List<LocalMediaFolder> = emptyList(),
-    val indexedAtEpochMs: Long = 0)
+    val indexedAtEpochMs: Long = 0,
+    val downloadPaths: Map<String, String> = emptyMap())

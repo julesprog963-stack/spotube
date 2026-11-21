@@ -40,6 +40,9 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.style.TextOverflow
+import org.koin.compose.viewmodel.koinViewModel
+import org.spotube.spotube.modules.library.playlist.LibraryPlaylistsState
+import org.spotube.spotube.modules.library.playlist.LibraryPlaylistsViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.composeunstyled.Text
 import com.composeunstyled.currentWindowWidthBreakpoint
@@ -117,11 +120,21 @@ fun LibraryScreen(libraryState: LibraryState = koinInject()) {
         }
         Column(Modifier.weight(1f).padding(horizontal = 12.dp)) {
             when (state.currentTab) {
-                LibraryTab.Playlists -> MetadataPluginGuard(showTopBar = false, requireLogin = true) {
-                    LibraryPlaylistsScreen(
-                        showCreatePlaylist = state.showCreatePlaylist,
-                        viewMode = viewMode
-                    )
+                LibraryTab.Playlists -> {
+                    val playlists: LibraryPlaylistsViewModel = koinViewModel()
+                    val playlistState by playlists.uiState.collectAsStateWithLifecycle()
+                    val content: @Composable () -> Unit = {
+                        LibraryPlaylistsScreen(
+                            showCreatePlaylist = state.showCreatePlaylist,
+                            viewMode = viewMode,
+                            viewModel = playlists
+                        )
+                    }
+                    if ((playlistState as? LibraryPlaylistsState.Data)?.allItems?.isNotEmpty() == true) {
+                        content()
+                    } else {
+                        MetadataPluginGuard(showTopBar = false, requireLogin = true, content = content)
+                    }
                 }
 
                 LibraryTab.Albums -> MetadataPluginGuard(showTopBar = false, requireLogin = true) {

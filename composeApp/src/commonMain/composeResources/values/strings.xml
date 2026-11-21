@@ -127,6 +127,7 @@
     <string name="settings_theme_title">Theme</string>
     <string name="settings_theme_subtitle_current">Choose how Spotube matches your system appearance. Current: %1$s</string>
     <string name="settings_theme_light">Light</string>
+    <string name="settings_theme_dark_green">Dark green</string>
     <string name="settings_theme_dark">Dark</string>
     <string name="settings_theme_system">System</string>
 
@@ -982,6 +983,9 @@
     <!-- Playlist -->
     <string name="playlist_owner_unknown">Unknown</string>
     <string name="playlist_loading_title">Loading playlist...</string>
+    <string name="playlist_download_options">Playlist downloads</string>
+    <string name="playlist_auto_download">Download playlist</string>
+    <string name="playlist_download_wifi_only">Wi-Fi only</string>
     <string name="playlist_add_tracks_button">Add Tracks</string>
     <string name="playlist_add_tracks_title">Add Tracks to Playlist</string>
     <string name="playlist_add_tracks_search_placeholder">Search tracks...</string>

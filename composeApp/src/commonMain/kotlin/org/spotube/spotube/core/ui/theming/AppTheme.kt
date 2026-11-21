@@ -203,10 +203,10 @@ fun SpotubeTheme(
 ) {
     val isDarkTheme = when (settings.theme) {
         Theme.LIGHT -> false
-        Theme.DARK -> true
+        Theme.DARK, Theme.DARK_GREEN -> true
         Theme.SYSTEM -> isSystemDarkTheme()
     }
-    val palette: MillenniumPalette = settings.palette
+    val palette = if (settings.theme == Theme.DARK_GREEN) MillenniumPalette.Lime else settings.palette
 
     val darkTheme = MillenniumDarkThemeComponents
     val lightTheme = MillenniumLightThemeComponents

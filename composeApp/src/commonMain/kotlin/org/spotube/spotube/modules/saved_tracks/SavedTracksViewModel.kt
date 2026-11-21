@@ -176,15 +176,22 @@ class SavedTracksViewModel(
 
     private suspend fun loadInitialData() {
         runCatching {
-            val tracksResult = repository.getSavedTracks()
-            val totalCount = repository.getSavedTracksCount() ?: 0
+            repository.cachedSavedTracks()?.let { cached ->
+                if (_state.value !is SavedTracksScreenState.Data) {
+                    _state.value = SavedTracksScreenState.Data.Loaded(
+                        tracks = cached.items, nextPagination = cached.nextPagination, totalCount = cached.totalCount)
+                }
+            }
+            val result = repository.getSavedTracks()
             _state.value = SavedTracksScreenState.Data.Loaded(
-                tracks = tracksResult?.items ?: emptyList(),
-                nextPagination = tracksResult?.nextPagination,
-                totalCount = totalCount)
+                tracks = result?.items.orEmpty(),
+                nextPagination = result?.nextPagination,
+                totalCount = result?.totalCount ?: 0)
         }.onFailure { e ->
             logger.e(e) { "Failed to load saved tracks" }
-            _state.value = SavedTracksScreenState.Error(e.message ?: getString(Res.string.common_unknown_error))
+            if (_state.value !is SavedTracksScreenState.Data) {
+                _state.value = SavedTracksScreenState.Error(e.message ?: getString(Res.string.common_unknown_error))
+            }
         }
     }
 
@@ -201,7 +208,7 @@ class SavedTracksViewModel(
                         totalCount = currentState.totalCount)
                 }.onFailure { e ->
                     logger.e(e) { "Failed to load more tracks" }
-                    _state.value = SavedTracksScreenState.Error(e.message ?: getString(Res.string.common_unknown_error))
+                    _state.value = currentState
                 }
             }
         }
